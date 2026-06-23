@@ -232,6 +232,7 @@ type FSharpGeneratorDriverRunResult =
         UpdatedSourceFiles: ImmutableArray<string>
         GeneratedSourceStore: FSharpGeneratedSourceStore
         ElapsedMilliseconds: int64
+        CacheHit: bool
     }
 
 type FSharpGeneratedSourceReport =
@@ -258,6 +259,7 @@ type FSharpGeneratorRunReport =
         Diagnostics: ImmutableArray<FSharpGeneratorDiagnosticReport>
         UpdatedSourceFiles: ImmutableArray<string>
         ElapsedMilliseconds: int64
+        CacheHit: bool
     }
 
 type FSharpSourceGeneratorConfiguration =

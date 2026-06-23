@@ -79,6 +79,7 @@ module internal RunReport =
                 Diagnostics = result.Diagnostics |> Seq.map diagnosticReport |> ImmutableArray.CreateRange
                 UpdatedSourceFiles = result.UpdatedSourceFiles
                 ElapsedMilliseconds = result.ElapsedMilliseconds
+                CacheHit = result.CacheHit
             }
 
         let options = JsonSerializerOptions(WriteIndented = true)

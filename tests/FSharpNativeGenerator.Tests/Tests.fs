@@ -50,6 +50,17 @@ let private snapshot outputKind sourceFiles =
             }
     }
 
+let private snapshotWithSourceContents outputKind sourceFiles =
+    let baseSnapshot = snapshot outputKind (sourceFiles |> List.map fst)
+
+    {
+        baseSnapshot with
+            SourceFiles =
+                sourceFiles
+                |> List.map (fun (path, content) -> FSharpSourceFileSnapshot.create path content)
+                |> immutableArray
+    }
+
 let private snapshotWithAdditional outputKind sourceFiles additionalTexts =
     let baseSnapshot = snapshot outputKind sourceFiles
 
@@ -295,6 +306,16 @@ type InvalidSourceGenerator(hintName: string, source: string) =
                     productionContext.AddImplementationSource(hintName, text source, Prelude)))
 
 [<FSharpGenerator>]
+type CountingGenerator(counter: ref<int>) =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    counter.Value <- counter.Value + 1
+                    productionContext.AddImplementationSource("Counted", text "module Counted\nlet value = 1", Prelude)))
+
+[<FSharpGenerator>]
 type BuildHarnessGenerator() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
@@ -520,6 +541,75 @@ let ``project stamp changes when generator set changes even if no sources are ge
     let _, optionsB, _ = FSharpGeneratorDriver.Create([ NoOutputGeneratorB() ], options).RunGeneratorsAndUpdateProjectOptions(project, CancellationToken.None)
 
     Assert.NotEqual(optionsA.Stamp, optionsB.Stamp)
+
+[<Fact>]
+let ``driver reuses cached result when inputs are unchanged`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let counter = ref 0
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let project = snapshot Library [ domain ]
+    let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
+
+    let updatedDriver, first = driver.RunGenerators(project, CancellationToken.None)
+    let _, second = updatedDriver.RunGenerators(project, CancellationToken.None)
+
+    Assert.False(first.CacheHit)
+    Assert.True(second.CacheHit)
+    Assert.Equal(1, counter.Value)
+    Assert.Equal<string array>(first.UpdatedSourceFiles |> Seq.toArray, second.UpdatedSourceFiles |> Seq.toArray)
+
+[<Fact>]
+let ``source content change invalidates cached result`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let counter = ref 0
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let firstProject = snapshotWithSourceContents Library [ domain, "module Domain\nlet value = 1" ]
+    let secondProject = snapshotWithSourceContents Library [ domain, "module Domain\nlet value = 2" ]
+    let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
+
+    let updatedDriver, first = driver.RunGenerators(firstProject, CancellationToken.None)
+    let _, second = updatedDriver.RunGenerators(secondProject, CancellationToken.None)
+
+    Assert.False(first.CacheHit)
+    Assert.False(second.CacheHit)
+    Assert.Equal(2, counter.Value)
+
+[<Fact>]
+let ``additional file checksum change invalidates cached result`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let schema = fileIn root "schema.json"
+    let counter = ref 0
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let firstProject = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"A"}""" ]
+    let secondProject = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"B"}""" ]
+    let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
+
+    let updatedDriver, first = driver.RunGenerators(firstProject, CancellationToken.None)
+    let _, second = updatedDriver.RunGenerators(secondProject, CancellationToken.None)
+
+    Assert.False(first.CacheHit)
+    Assert.False(second.CacheHit)
+    Assert.Equal(2, counter.Value)
+
+[<Fact>]
+let ``analyzer config option change invalidates cached result`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let counter = ref 0
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let firstProject = snapshotWithAnalyzerOptions Library [ domain ] [ KeyValuePair("build_property.Mode", "A") ]
+    let secondProject = snapshotWithAnalyzerOptions Library [ domain ] [ KeyValuePair("build_property.Mode", "B") ]
+    let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
+
+    let updatedDriver, first = driver.RunGenerators(firstProject, CancellationToken.None)
+    let _, second = updatedDriver.RunGenerators(secondProject, CancellationToken.None)
+
+    Assert.False(first.CacheHit)
+    Assert.False(second.CacheHit)
+    Assert.Equal(2, counter.Value)
 
 [<Fact>]
 let ``additional text provider can filter and generate source`` () =

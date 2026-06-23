@@ -1,6 +1,7 @@
 namespace FSharp.Compiler.SourceGeneration
 
 open System.Collections.Immutable
+open System.Collections.Generic
 
 module FSharpProjectCacheIdentity =
     let compute (snapshot: FSharpGeneratorProjectSnapshot) (generatedSources: seq<FSharpGeneratedSource>) =
@@ -36,5 +37,42 @@ module internal FSharpGeneratorDriverIdentity =
                 yield generatorType.FullName
                 yield generatorType.Assembly.Location
                 yield string generatorType.Assembly.ManifestModule.ModuleVersionId
+        }
+        |> Hashing.sha256Many
+
+module internal FSharpGeneratorRunCacheKey =
+    let private dictionaryParts (values: IReadOnlyDictionary<string, string>) =
+        values
+        |> Seq.map (fun pair -> pair.Key, pair.Value)
+        |> Seq.sortBy fst
+        |> Seq.collect (fun (key, value) -> seq { key; value })
+
+    let compute (generators: ImmutableArray<IFSharpIncrementalGenerator>) (options: FSharpGeneratorDriverOptions) (snapshot: FSharpGeneratorProjectSnapshot) =
+        seq {
+            yield Hashing.toHex (FSharpGeneratorDriverIdentity.compute generators options)
+            yield snapshot.ProjectOptions.ProjectFilePath
+            yield defaultArg snapshot.ProjectOptions.ProjectId ""
+            yield! snapshot.ProjectOptions.SourceFiles
+            yield! snapshot.ProjectOptions.OtherOptions
+            yield string snapshot.ProjectOptions.OutputKind
+            yield defaultArg snapshot.ProjectOptions.Stamp ""
+
+            for sourceFile in snapshot.SourceFiles do
+                yield sourceFile.Path
+                yield string sourceFile.IsSignatureFile
+                yield Hashing.toHex sourceFile.Checksum
+
+            for additionalText in snapshot.AdditionalTexts do
+                yield additionalText.Path
+
+                match additionalText.Checksum with
+                | Some checksum -> yield Hashing.toHex checksum
+                | None -> yield "<missing>"
+
+            yield! dictionaryParts snapshot.AnalyzerConfigOptions.GlobalOptions
+
+            for sourceFile in snapshot.SourceFiles do
+                yield sourceFile.Path
+                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath sourceFile.Path |> dictionaryParts
         }
         |> Hashing.sha256Many

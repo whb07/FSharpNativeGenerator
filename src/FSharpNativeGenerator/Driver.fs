@@ -7,9 +7,15 @@ open System.IO
 open System.Text
 open System.Threading
 
-type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementalGenerator>, options: FSharpGeneratorDriverOptions, registeredGenerators: ImmutableArray<RegisteredGenerator> option) =
+type internal FSharpGeneratorRunCacheEntry =
+    {
+        Key: string
+        Result: FSharpGeneratorDriverRunResult
+    }
+
+type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementalGenerator>, options: FSharpGeneratorDriverOptions, registeredGenerators: ImmutableArray<RegisteredGenerator> option, runCacheEntry: FSharpGeneratorRunCacheEntry option) =
     static member Create(generators: seq<IFSharpIncrementalGenerator>, options: FSharpGeneratorDriverOptions) =
-        FSharpGeneratorDriver(ImmutableArray.CreateRange generators, options, None)
+        FSharpGeneratorDriver(ImmutableArray.CreateRange generators, options, None, None)
 
     member _.Options = options
 
@@ -55,7 +61,7 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
                     })
                 |> ImmutableArray.CreateRange
 
-            FSharpGeneratorDriver(generators, options, Some registered), registered
+            FSharpGeneratorDriver(generators, options, Some registered, runCacheEntry), registered
 
     member private _.MaterializePending(pending: PendingGeneratedSource list) =
         let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
@@ -95,88 +101,98 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
     member this.RunGenerators(projectSnapshot: FSharpGeneratorProjectSnapshot, cancellationToken: CancellationToken) =
         let stopwatch = Stopwatch.StartNew()
         let updatedDriver, initializedGenerators = this.InitializeGenerators()
-        let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
-        let pending = ResizeArray<PendingGeneratedSource>()
+        let cacheKey = FSharpGeneratorRunCacheKey.compute generators options projectSnapshot |> Hashing.toHex
 
-        if options.MaxGenerationPasses <> 1 then
-            diagnostics.Add(Diagnostics.error "FSG0010" "Fixed-point generation is not supported in V1. MaxGenerationPasses must be 1.")
+        let runFresh () =
+            let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
+            let pending = ResizeArray<PendingGeneratedSource>()
 
-        if not (diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error)) then
-            for generator in initializedGenerators do
-                diagnostics.AddRange generator.InitializationDiagnostics
+            if options.MaxGenerationPasses <> 1 then
+                diagnostics.Add(Diagnostics.error "FSG0010" "Fixed-point generation is not supported in V1. MaxGenerationPasses must be 1.")
 
-                if generator.InitializationDiagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
-                    ()
-                else
-                    let postInitContext = FSharpPostInitializationContext(generator.GeneratorName, pending, diagnostics, cancellationToken)
+            if not (diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error)) then
+                for generator in initializedGenerators do
+                    diagnostics.AddRange generator.InitializationDiagnostics
 
-                    for output in generator.PostInitializationOutputs do
-                        try
-                            output.Invoke postInitContext
-                        with ex ->
-                            diagnostics.Add(Diagnostics.error "FSG0004" (sprintf "Generator '%s' threw during post-initialization output: %s" generator.GeneratorName ex.Message))
-
-                    let productionContext = FSharpSourceProductionContext(generator.GeneratorName, pending, diagnostics, cancellationToken)
-
-                    for output in generator.SourceOutputs do
-                        try
-                            output projectSnapshot productionContext
-                        with ex ->
-                            diagnostics.Add(Diagnostics.error "FSG0004" (sprintf "Generator '%s' threw during source output: %s" generator.GeneratorName ex.Message))
-
-        let materialized, materializeDiagnostics = updatedDriver.MaterializePending(pending |> Seq.toList)
-        diagnostics.AddRange materializeDiagnostics
-
-        for diagnostic in materialized |> Seq.collect GeneratedSourceValidation.validate do
-            diagnostics.Add diagnostic
-
-        let units, unitDiagnostics = Placement.buildUnits materialized (pending |> Seq.toList)
-        diagnostics.AddRange unitDiagnostics
-
-        let generatedPaths = materialized |> List.map _.ResolvedPath
-
-        let updatedSourceFiles, placementDiagnostics =
-            Placement.resolve projectSnapshot.ProjectOptions.OutputKind (projectSnapshot.ProjectOptions.SourceFiles |> Seq.toList) generatedPaths units
-
-        diagnostics.AddRange placementDiagnostics
-
-        let generatedSources =
-            if diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
-                ImmutableArray<FSharpGeneratedSource>.Empty
-            else
-                ImmutableArray.CreateRange materialized
-
-        let generatedStore =
-            generatedSources
-            |> Seq.fold (fun (store: FSharpGeneratedSourceStore) (source: FSharpGeneratedSource) -> store.Add source) FSharpGeneratedSourceStore.Empty
-
-        if options.EmitGeneratedFiles && not (diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error)) then
-            let outputRoot = defaultArg options.GeneratedFilesOutputPath options.GeneratedRoot
-
-            for source in generatedSources do
-                let relativePath = Path.GetRelativePath(Path.GetFullPath(options.GeneratedRoot), source.ResolvedPath)
-                let outputPath = Path.Combine(outputRoot, relativePath)
-                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)) |> ignore
-                File.WriteAllText(outputPath, source.SourceText.Text, Encoding.UTF8)
-
-        stopwatch.Stop()
-
-        let result =
-            {
-                GeneratedSources = generatedSources
-                Diagnostics = ImmutableArray.CreateRange diagnostics
-                UpdatedSourceFiles =
-                    if diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
-                        projectSnapshot.ProjectOptions.SourceFiles
+                    if generator.InitializationDiagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
+                        ()
                     else
-                        updatedSourceFiles
-                GeneratedSourceStore = generatedStore
-                ElapsedMilliseconds = stopwatch.ElapsedMilliseconds
-            }
+                        let postInitContext = FSharpPostInitializationContext(generator.GeneratorName, pending, diagnostics, cancellationToken)
 
-        options.ReportPath |> Option.iter (fun path -> RunReport.write path result)
+                        for output in generator.PostInitializationOutputs do
+                            try
+                                output.Invoke postInitContext
+                            with ex ->
+                                diagnostics.Add(Diagnostics.error "FSG0004" (sprintf "Generator '%s' threw during post-initialization output: %s" generator.GeneratorName ex.Message))
 
-        updatedDriver, result
+                        let productionContext = FSharpSourceProductionContext(generator.GeneratorName, pending, diagnostics, cancellationToken)
+
+                        for output in generator.SourceOutputs do
+                            try
+                                output projectSnapshot productionContext
+                            with ex ->
+                                diagnostics.Add(Diagnostics.error "FSG0004" (sprintf "Generator '%s' threw during source output: %s" generator.GeneratorName ex.Message))
+
+            let materialized, materializeDiagnostics = updatedDriver.MaterializePending(pending |> Seq.toList)
+            diagnostics.AddRange materializeDiagnostics
+
+            for diagnostic in materialized |> Seq.collect GeneratedSourceValidation.validate do
+                diagnostics.Add diagnostic
+
+            let units, unitDiagnostics = Placement.buildUnits materialized (pending |> Seq.toList)
+            diagnostics.AddRange unitDiagnostics
+
+            let generatedPaths = materialized |> List.map _.ResolvedPath
+
+            let updatedSourceFiles, placementDiagnostics =
+                Placement.resolve projectSnapshot.ProjectOptions.OutputKind (projectSnapshot.ProjectOptions.SourceFiles |> Seq.toList) generatedPaths units
+
+            diagnostics.AddRange placementDiagnostics
+
+            let generatedSources =
+                if diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
+                    ImmutableArray<FSharpGeneratedSource>.Empty
+                else
+                    ImmutableArray.CreateRange materialized
+
+            let generatedStore =
+                generatedSources
+                |> Seq.fold (fun (store: FSharpGeneratedSourceStore) (source: FSharpGeneratedSource) -> store.Add source) FSharpGeneratedSourceStore.Empty
+
+            if options.EmitGeneratedFiles && not (diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error)) then
+                let outputRoot = defaultArg options.GeneratedFilesOutputPath options.GeneratedRoot
+
+                for source in generatedSources do
+                    let relativePath = Path.GetRelativePath(Path.GetFullPath(options.GeneratedRoot), source.ResolvedPath)
+                    let outputPath = Path.Combine(outputRoot, relativePath)
+                    Directory.CreateDirectory(Path.GetDirectoryName(outputPath)) |> ignore
+                    File.WriteAllText(outputPath, source.SourceText.Text, Encoding.UTF8)
+
+            stopwatch.Stop()
+
+            let result =
+                {
+                    GeneratedSources = generatedSources
+                    Diagnostics = ImmutableArray.CreateRange diagnostics
+                    UpdatedSourceFiles =
+                        if diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
+                            projectSnapshot.ProjectOptions.SourceFiles
+                        else
+                            updatedSourceFiles
+                    GeneratedSourceStore = generatedStore
+                    ElapsedMilliseconds = stopwatch.ElapsedMilliseconds
+                    CacheHit = false
+                }
+
+            options.ReportPath |> Option.iter (fun path -> RunReport.write path result)
+
+            FSharpGeneratorDriver(generators, options, Some initializedGenerators, Some { Key = cacheKey; Result = result }), result
+
+        match runCacheEntry with
+        | Some entry when entry.Key = cacheKey ->
+            let cachedResult = { entry.Result with CacheHit = true; ElapsedMilliseconds = stopwatch.ElapsedMilliseconds }
+            updatedDriver, cachedResult
+        | _ -> runFresh ()
 
     member this.RunGeneratorsAndUpdateProjectOptions(projectSnapshot: FSharpGeneratorProjectSnapshot, cancellationToken: CancellationToken) =
         let updatedDriver, result = this.RunGenerators(projectSnapshot, cancellationToken)
