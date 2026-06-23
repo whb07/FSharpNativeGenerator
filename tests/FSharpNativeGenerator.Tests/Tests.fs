@@ -3,6 +3,7 @@ module FSharpNativeGenerator.Tests
 open System
 open System.Collections.Generic
 open System.Collections.Immutable
+open System.Diagnostics
 open System.IO
 open System.Reflection
 open System.Text.Json
@@ -80,6 +81,39 @@ let private snapshotWithAnalyzerOptions outputKind sourceFiles (globalOptions: s
 let private writeFile path (content: string) =
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))) |> ignore
     File.WriteAllText(path, content)
+
+let private runDotnetBuild projectPath =
+    let startInfo = ProcessStartInfo("dotnet", "build \"" + projectPath + "\" --nologo")
+    startInfo.RedirectStandardOutput <- true
+    startInfo.RedirectStandardError <- true
+    startInfo.UseShellExecute <- false
+    startInfo.WorkingDirectory <- Path.GetDirectoryName(projectPath)
+
+    use proc = Process.Start(startInfo)
+    let output = proc.StandardOutput.ReadToEnd()
+    let error = proc.StandardError.ReadToEnd()
+    proc.WaitForExit()
+    proc.ExitCode, output + error
+
+let private writeFSharpProject projectPath sourceFiles =
+    let compileItems =
+        sourceFiles
+        |> Seq.map (fun sourceFile -> sprintf "    <Compile Include=\"%s\" />" sourceFile)
+        |> String.concat Environment.NewLine
+
+    writeFile
+        projectPath
+        ($"""<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+{compileItems}
+  </ItemGroup>
+</Project>
+""")
 
 let private runWith options generator snapshot =
     let driver = FSharpGeneratorDriver.Create([ generator ], options)
@@ -259,6 +293,25 @@ type InvalidSourceGenerator(hintName: string, source: string) =
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
                     productionContext.AddImplementationSource(hintName, text source, Prelude)))
+
+[<FSharpGenerator>]
+type BuildHarnessGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    productionContext.AddImplementationSource("GeneratedPrelude", text "module GeneratedPrelude\nlet answer = 42", Prelude)))
+
+[<FSharpGenerator>]
+type BuildHarnessSignaturePairGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    productionContext.AddSignatureSource("GeneratedContract", text "module GeneratedContract\nval answer: int", "GeneratedContract", Prelude)
+                    productionContext.AddImplementationSource("GeneratedContract", text "module GeneratedContract\nlet answer = 42", Prelude)))
 
 [<Fact>]
 let ``prelude source is inserted before original files and stored`` () =
@@ -614,6 +667,60 @@ let ``report path writes generated source and diagnostic summary`` () =
 
     Assert.Equal("Generated", firstGeneratedSource.GetProperty("HintName").GetString())
     Assert.Equal(result.GeneratedSources.[0].ResolvedPath, firstGeneratedSource.GetProperty("ResolvedPath").GetString())
+
+[<Fact>]
+let ``generated ordered source list builds in a real FSharp project`` () =
+    let root = tempRoot ()
+    let generatedRoot = fileIn root "generated"
+    let projectPath = fileIn root "Harness.fsproj"
+    let consumer = fileIn root "Consumer.fs"
+
+    writeFile consumer "module Consumer\nlet value = GeneratedPrelude.answer + 1"
+
+    let options =
+        {
+            FSharpGeneratorDriverOptions.defaults with
+                GeneratedRoot = generatedRoot
+                EmitGeneratedFiles = true
+                GeneratedFilesOutputPath = Some generatedRoot
+        }
+
+    let result = snapshot Library [ consumer ] |> runWith options (BuildHarnessGenerator())
+
+    Assert.Empty(result.Diagnostics)
+    writeFSharpProject projectPath result.UpdatedSourceFiles
+
+    let exitCode, output = runDotnetBuild projectPath
+    if exitCode <> 0 then
+        failwith output
+
+[<Fact>]
+let ``generated signature and implementation pair builds in resolved order`` () =
+    let root = tempRoot ()
+    let generatedRoot = fileIn root "generated"
+    let projectPath = fileIn root "Harness.fsproj"
+    let consumer = fileIn root "Consumer.fs"
+
+    writeFile consumer "module Consumer\nlet value: int = GeneratedContract.answer"
+
+    let options =
+        {
+            FSharpGeneratorDriverOptions.defaults with
+                GeneratedRoot = generatedRoot
+                EmitGeneratedFiles = true
+                GeneratedFilesOutputPath = Some generatedRoot
+        }
+
+    let result = snapshot Library [ consumer ] |> runWith options (BuildHarnessSignaturePairGenerator())
+
+    Assert.Empty(result.Diagnostics)
+    Assert.Equal(Signature, result.GeneratedSources.[0].Kind)
+    Assert.Equal(Implementation, result.GeneratedSources.[1].Kind)
+    writeFSharpProject projectPath result.UpdatedSourceFiles
+
+    let exitCode, output = runDotnetBuild projectPath
+    if exitCode <> 0 then
+        failwith output
 
 [<Fact>]
 let ``command line parser extracts generator options and preserves unrelated arguments`` () =

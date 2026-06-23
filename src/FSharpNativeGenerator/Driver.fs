@@ -62,10 +62,10 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
 
         let duplicateHints =
             pending
-            |> Seq.countBy (fun source -> source.GeneratorName, source.HintName)
+            |> Seq.countBy (fun source -> source.GeneratorName, source.HintName, source.Kind)
             |> Seq.filter (fun (_, count) -> count > 1)
 
-        for ((generatorName, hintName), _) in duplicateHints do
+        for ((generatorName, hintName, _), _) in duplicateHints do
             diagnostics.Add(Diagnostics.error "FSG0006" (sprintf "Generator '%s' emitted duplicate hint name '%s'." generatorName hintName))
 
         pending
