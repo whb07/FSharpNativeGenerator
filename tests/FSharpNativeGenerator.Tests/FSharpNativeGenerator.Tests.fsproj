@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/FSharpNativeGenerator/FSharpNativeGenerator.fsproj" />
+    <ProjectReference Include="../FSharpNativeGenerator.TestGenerators/FSharpNativeGenerator.TestGenerators.fsproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

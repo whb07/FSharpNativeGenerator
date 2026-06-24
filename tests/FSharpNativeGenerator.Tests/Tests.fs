@@ -23,6 +23,17 @@ let private tempRoot () =
 let private fileIn root name =
     Path.Combine(root, name) |> Path.GetFullPath
 
+let private repoRoot () =
+    let rec loop directory =
+        if File.Exists(Path.Combine(directory, "FSharpNativeGenerator.slnx")) then
+            directory
+        else
+            match Directory.GetParent(directory) with
+            | null -> invalidOp "Could not locate repository root."
+            | parent -> loop parent.FullName
+
+    loop AppContext.BaseDirectory
+
 let private snapshot outputKind sourceFiles =
     let sourceFiles = sourceFiles |> List.map Path.GetFullPath
 
@@ -93,8 +104,8 @@ let private writeFile path (content: string) =
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))) |> ignore
     File.WriteAllText(path, content)
 
-let private runDotnetBuild projectPath =
-    let startInfo = ProcessStartInfo("dotnet", "build \"" + projectPath + "\" --nologo")
+let private runDotnetBuild (projectPath: string) =
+    let startInfo: ProcessStartInfo = ProcessStartInfo("dotnet", "build \"" + projectPath + "\" --nologo")
     startInfo.RedirectStandardOutput <- true
     startInfo.RedirectStandardError <- true
     startInfo.UseShellExecute <- false
@@ -105,6 +116,19 @@ let private runDotnetBuild projectPath =
     let error = proc.StandardError.ReadToEnd()
     proc.WaitForExit()
     proc.ExitCode, output + error
+
+let private runProcess (fileName: string) (arguments: string) (workingDirectory: string) =
+    let startInfo: ProcessStartInfo = ProcessStartInfo(fileName, arguments)
+    startInfo.RedirectStandardOutput <- true
+    startInfo.RedirectStandardError <- true
+    startInfo.UseShellExecute <- false
+    startInfo.WorkingDirectory <- workingDirectory
+
+    use proc = Process.Start(startInfo)
+    let output = proc.StandardOutput.ReadToEnd()
+    let error = proc.StandardError.ReadToEnd()
+    proc.WaitForExit()
+    proc.ExitCode, output, error
 
 let private writeFSharpProject projectPath sourceFiles =
     let compileItems =
@@ -924,3 +948,51 @@ let ``configuration loads generators from configured assembly paths`` () =
     let loadResult = FSharpSourceGeneratorConfiguration.loadGenerators result.Configuration
 
     Assert.Contains(loadResult.Generators, fun generator -> generator.GetType() = typeof<LoadableGenerator>)
+
+[<Fact>]
+let ``CLI runs generators without MSBuild and prints updated source list`` () =
+    let root = tempRoot ()
+    let consumer = fileIn root "Consumer.fs"
+    let generatedOutput = fileIn root "generated"
+    let reportPath = fileIn root "report.json"
+    let repositoryRoot = repoRoot ()
+    let cliProject = Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj") |> Path.GetFullPath
+    let generatorAssembly =
+        Path.Combine(repositoryRoot, "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        |> Path.GetFullPath
+
+    writeFile consumer "module Consumer\nlet value = GeneratedPrelude.answer"
+
+    let arguments =
+        String.concat
+            " "
+            [
+                "run"
+                "--project"
+                "\"" + cliProject + "\""
+                "--"
+                "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
+                "--emit-fsharp-generated-files+"
+                "--fsharp-generated-files-output:" + "\"" + generatedOutput + "\""
+                "--fsharp-source-generator-report:" + "\"" + reportPath + "\""
+                "\"" + consumer + "\""
+            ]
+
+    let exitCode, output, error = runProcess "dotnet" arguments root
+
+    if exitCode <> 0 then
+        failwith (output + error)
+
+    Assert.Contains(consumer, output)
+    Assert.True(File.Exists(reportPath), reportPath)
+
+    use report = JsonDocument.Parse(File.ReadAllText(reportPath))
+    let generatedSources = report.RootElement.GetProperty("GeneratedSources")
+    let generatedPrelude =
+        generatedSources.EnumerateArray()
+        |> Seq.find (fun item -> item.GetProperty("HintName").GetString() = "GeneratedPrelude")
+
+    let generatedPath = generatedPrelude.GetProperty("ResolvedPath").GetString()
+
+    Assert.Contains(generatedPath, output)
+    Assert.True(File.Exists(generatedPath), generatedPath)

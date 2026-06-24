@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj" />
     <Project Path="src/FSharpNativeGenerator/FSharpNativeGenerator.fsproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/FSharpNativeGenerator.TestGenerators/FSharpNativeGenerator.TestGenerators.fsproj" />
     <Project Path="tests/FSharpNativeGenerator.Tests/FSharpNativeGenerator.Tests.fsproj" />
   </Folder>
 </Solution>
