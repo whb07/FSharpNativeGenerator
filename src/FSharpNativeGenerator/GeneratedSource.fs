@@ -134,7 +134,11 @@ module internal Placement =
         |> List.tryLast
         |> Option.map fst
 
-    let buildUnits (generatedSources: FSharpGeneratedSource list) (pending: PendingGeneratedSource list) =
+    let private normalizedHint hintName =
+        GeneratedPaths.stripKnownExtension hintName
+        |> _.ToUpperInvariant()
+
+    let buildUnits (originalImplementationHints: Set<string>) (generatedSources: FSharpGeneratedSource list) (pending: PendingGeneratedSource list) =
         let signatures: FSharpGeneratedSource list =
             generatedSources |> List.filter (fun source -> source.Kind = Signature)
 
@@ -148,13 +152,19 @@ module internal Placement =
             |> Seq.map (fun source -> (source.GeneratorName, source.HintName), source)
             |> dict
 
+        let isOriginalImplementationHint hintName =
+            originalImplementationHints.Contains(normalizedHint hintName)
+
         for pendingSignature in pending |> List.filter (fun source -> source.Kind = Signature) do
             match pendingSignature.CompanionImplementationHintName with
             | None ->
                 diagnostics.Add(Diagnostics.error "FSG0008" (sprintf "Generated signature '%s' does not specify a generated implementation companion." pendingSignature.HintName))
             | Some companionHint ->
                 if not (implementationByGeneratorAndHint.ContainsKey((pendingSignature.GeneratorName, companionHint))) then
-                    diagnostics.Add(Diagnostics.error "FSG0008" (sprintf "Generated signature '%s' references missing implementation companion '%s'." pendingSignature.HintName companionHint))
+                    if isOriginalImplementationHint companionHint || isOriginalImplementationHint pendingSignature.HintName then
+                        diagnostics.Add(Diagnostics.error "FSG0014" (sprintf "Generated signature '%s' targets user implementation '%s'. Generated signatures for user-authored implementations are not supported in V1." pendingSignature.HintName companionHint))
+                    else
+                        diagnostics.Add(Diagnostics.error "FSG0008" (sprintf "Generated signature '%s' references missing implementation companion '%s'." pendingSignature.HintName companionHint))
 
         let signatureCompanionHints =
             pending

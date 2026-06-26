@@ -139,7 +139,13 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
             for diagnostic in materialized |> Seq.collect GeneratedSourceValidation.validate do
                 diagnostics.Add diagnostic
 
-            let units, unitDiagnostics = Placement.buildUnits materialized (pending |> Seq.toList)
+            let originalImplementationHints =
+                projectSnapshot.ProjectOptions.SourceFiles
+                |> Seq.filter (fun path -> path.EndsWith(".fs", StringComparison.OrdinalIgnoreCase))
+                |> Seq.map (fun path -> Path.GetFileNameWithoutExtension(path).ToUpperInvariant())
+                |> Set.ofSeq
+
+            let units, unitDiagnostics = Placement.buildUnits originalImplementationHints materialized (pending |> Seq.toList)
             diagnostics.AddRange unitDiagnostics
 
             let generatedPaths = materialized |> List.map _.ResolvedPath

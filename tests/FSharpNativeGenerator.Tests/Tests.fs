@@ -195,6 +195,15 @@ type MissingSignatureCompanionGenerator() =
                     productionContext.AddSignatureSource("ClientSig", text "module Generated.Client", "MissingClient", Prelude)))
 
 [<FSharpGenerator>]
+type UserImplementationSignatureGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    productionContext.AddSignatureSource("Domain", text "module Domain\nval value: int", "Domain", Prelude)))
+
+[<FSharpGenerator>]
 type ThrowingInitializationGenerator() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize _ =
@@ -505,6 +514,17 @@ let ``generated signature with missing companion fails`` () =
     let result = snapshot Library [ domain ] |> runWith options (MissingSignatureCompanionGenerator())
 
     Assert.True(hasDiagnostic "FSG0008" result)
+
+[<Fact>]
+let ``generated signature for user implementation fails with explicit diagnostic`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let result = snapshot Library [ domain ] |> runWith options (UserImplementationSignatureGenerator())
+
+    Assert.True(hasDiagnostic "FSG0014" result)
+    Assert.False(hasDiagnostic "FSG0008" result)
+    Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
 let ``implementation hint with fsi extension is rejected`` () =
