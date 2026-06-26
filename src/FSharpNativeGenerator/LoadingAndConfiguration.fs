@@ -45,6 +45,18 @@ module FSharpGeneratorAssemblyLoader =
     let private implementsGenerator (candidate: Type) =
         typeof<IFSharpIncrementalGenerator>.IsAssignableFrom(candidate)
 
+    let private loadableTypes (diagnostics: ResizeArray<FSharpGeneratorDiagnostic>) (assembly: Assembly) =
+        try
+            assembly.GetTypes()
+        with :? ReflectionTypeLoadException as ex ->
+            for loaderException in ex.LoaderExceptions do
+                if not (isNull loaderException) then
+                    diagnostics.Add(
+                        error "FSG0001" (sprintf "Generator assembly type load failed: %s" loaderException.Message)
+                    )
+
+            ex.Types |> Array.choose Option.ofObj
+
     let loadFromPath (path: string) =
         let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
         let generators = ResizeArray<IFSharpIncrementalGenerator>()
@@ -53,7 +65,7 @@ module FSharpGeneratorAssemblyLoader =
             let loadContext = GeneratorAssemblyLoadContext(path)
             let assembly = loadContext.LoadFromAssemblyPath(Path.GetFullPath(path))
 
-            for candidate in assembly.GetTypes() |> Array.sortBy _.FullName do
+            for candidate in loadableTypes diagnostics assembly |> Array.sortBy _.FullName do
                 let hasInterface = implementsGenerator candidate
 
                 match FSharpGeneratorAttributeHelpers.tryGet candidate, hasInterface with

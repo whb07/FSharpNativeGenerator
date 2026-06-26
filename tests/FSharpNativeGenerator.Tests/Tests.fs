@@ -206,6 +206,96 @@ let private writeGeneratorProject projectDirectory assemblyName =
     Path.Combine(projectDirectory, "bin", "Debug", "net10.0", assemblyName + ".dll")
     |> Path.GetFullPath
 
+let private writePartiallyLoadableGeneratorProject projectDirectory =
+    let dependencyDirectory = Path.Combine(projectDirectory, "MissingDependency")
+    let generatorDirectory = Path.Combine(projectDirectory, "PartialGenerator")
+    Directory.CreateDirectory(dependencyDirectory) |> ignore
+    Directory.CreateDirectory(generatorDirectory) |> ignore
+
+    let dependencyProjectPath =
+        Path.Combine(dependencyDirectory, "MissingDependency.fsproj")
+
+    let dependencySourcePath = Path.Combine(dependencyDirectory, "Library.fs")
+
+    let generatorProjectPath =
+        Path.Combine(generatorDirectory, "PartialGenerator.fsproj")
+
+    let generatorSourcePath = Path.Combine(generatorDirectory, "Library.fs")
+
+    let sourceGeneratorProjectPath =
+        Path.Combine(repoRoot (), "src/FSharpNativeGenerator/FSharpNativeGenerator.fsproj")
+        |> Path.GetFullPath
+
+    writeFile dependencySourcePath "namespace MissingDependency\ntype MissingBase() = class end"
+
+    writeFile
+        dependencyProjectPath
+        """<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisMode>All</AnalysisMode>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Library.fs" />
+  </ItemGroup>
+</Project>
+"""
+
+    let generatorSource =
+        [ "namespace PartialGenerator"
+          ""
+          "open System"
+          "open FSharp.Compiler.SourceGeneration"
+          ""
+          "[<FSharpGenerator>]"
+          "type GoodGenerator() ="
+          "    interface IFSharpIncrementalGenerator with"
+          "        member _.Initialize context ="
+          "            context.RegisterSourceOutput("
+          "                context.ProjectOptionsProvider,"
+          "                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->"
+          "                    productionContext.AddImplementationSource(\"PartialGood\", FSharpSourceText.OfString \"module PartialGood\", Prelude)))"
+          ""
+          "type BrokenType() ="
+          "    inherit MissingDependency.MissingBase()" ]
+        |> String.concat Environment.NewLine
+
+    writeFile generatorSourcePath generatorSource
+
+    let generatorProject =
+        [ "<Project Sdk=\"Microsoft.NET.Sdk\">"
+          "  <PropertyGroup>"
+          "    <TargetFramework>net10.0</TargetFramework>"
+          "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>"
+          "    <EnableNETAnalyzers>true</EnableNETAnalyzers>"
+          "    <AnalysisMode>All</AnalysisMode>"
+          "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>"
+          "  </PropertyGroup>"
+          "  <ItemGroup>"
+          "    <Compile Include=\"Library.fs\" />"
+          "  </ItemGroup>"
+          "  <ItemGroup>"
+          sprintf "    <ProjectReference Include=\"%s\" />" dependencyProjectPath
+          sprintf "    <ProjectReference Include=\"%s\" />" sourceGeneratorProjectPath
+          "  </ItemGroup>"
+          "</Project>" ]
+        |> String.concat Environment.NewLine
+
+    writeFile generatorProjectPath generatorProject
+
+    let exitCode, output = runDotnetBuild generatorProjectPath
+
+    if exitCode <> 0 then
+        failwith output
+
+    let outputDirectory = Path.Combine(generatorDirectory, "bin", "Debug", "net10.0")
+    File.Delete(Path.Combine(outputDirectory, "MissingDependency.dll"))
+
+    Path.Combine(outputDirectory, "PartialGenerator.dll") |> Path.GetFullPath
+
 let private runWith options generator snapshot =
     let driver = FSharpGeneratorDriver.Create([ generator ], options)
     driver.RunGenerators(snapshot, CancellationToken.None) |> snd
@@ -2145,6 +2235,17 @@ let ``assembly loader returns generators in deterministic type-name order`` () =
         |> Array.sortWith (fun left right -> StringComparer.Ordinal.Compare(left, right)),
         generatorTypeNames
     )
+
+[<Fact>]
+let ``assembly loader keeps loadable generators when another type fails to load`` () =
+    let root = tempRoot ()
+    let assemblyPath = writePartiallyLoadableGeneratorProject (fileIn root "Generator")
+
+    let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
+
+    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0001"))
+
+    Assert.Contains(result.Generators, fun generator -> generator.GetType().FullName = "PartialGenerator.GoodGenerator")
 
 [<Fact>]
 let ``assembly loader reports attributed type without generator interface`` () =
