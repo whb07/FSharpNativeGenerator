@@ -1302,6 +1302,48 @@ let ``source file order change updates project cache identity`` () =
     Assert.NotEqual<byte seq>(identityA, identityB)
 
 [<Fact>]
+let ``additional text change updates project cache identity`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let schema = fileIn root "schema.json"
+    let snapshotA = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"A"}""" ]
+    let snapshotB = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"B"}""" ]
+
+    let identityA = FSharpProjectCacheIdentity.compute snapshotA []
+    let identityB = FSharpProjectCacheIdentity.compute snapshotB []
+
+    Assert.NotEqual<byte seq>(identityA, identityB)
+
+[<Fact>]
+let ``additional text analyzer config updates project cache identity`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let schema = fileIn root "schema.json"
+    let projectWithMode mode =
+        let baseSnapshot = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"Customer"}""" ]
+
+        {
+            baseSnapshot with
+                AnalyzerConfigOptions =
+                    {
+                        GlobalOptions = Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
+                        GetOptionsForPath =
+                            fun path ->
+                                let values = Dictionary<string, string>()
+
+                                if String.Equals(Path.GetFullPath path, schema, StringComparison.OrdinalIgnoreCase) then
+                                    values["build_metadata.Mode"] <- mode
+
+                                values :> IReadOnlyDictionary<string, string>
+                    }
+        }
+
+    let identityA = FSharpProjectCacheIdentity.compute (projectWithMode "A") []
+    let identityB = FSharpProjectCacheIdentity.compute (projectWithMode "B") []
+
+    Assert.NotEqual<byte seq>(identityA, identityB)
+
+[<Fact>]
 let ``fixed point generation request is rejected`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"

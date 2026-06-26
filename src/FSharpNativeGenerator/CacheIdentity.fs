@@ -7,17 +7,53 @@ open System.IO
 open System.Security.Cryptography
 open System.Threading
 
+module internal CacheIdentityParts =
+    let dictionaryParts (values: IReadOnlyDictionary<string, string>) =
+        values
+        |> Seq.map (fun pair -> pair.Key, pair.Value)
+        |> Seq.sortBy fst
+        |> Seq.collect (fun (key, value) -> seq { key; value })
+
+    let additionalTextChecksumParts (additionalText: FSharpAdditionalText) (cancellationToken: CancellationToken) =
+        seq {
+            yield additionalText.Path
+
+            match additionalText.Checksum with
+            | Some checksum -> yield Hashing.toHex checksum
+            | None ->
+                cancellationToken.ThrowIfCancellationRequested()
+
+                match additionalText.GetText cancellationToken with
+                | Some sourceText -> yield Hashing.toHex (FSharpSourceText.checksum sourceText)
+                | None -> yield "<missing>"
+        }
+
 module FSharpProjectCacheIdentity =
     let compute (snapshot: FSharpGeneratorProjectSnapshot) (generatedSources: seq<FSharpGeneratedSource>) =
         seq {
             yield snapshot.ProjectOptions.ProjectFilePath
+            yield defaultArg snapshot.ProjectOptions.ProjectId ""
             yield! snapshot.ProjectOptions.SourceFiles
             yield! snapshot.ProjectOptions.OtherOptions
             yield string snapshot.ProjectOptions.OutputKind
 
             for sourceFile in snapshot.SourceFiles do
                 yield sourceFile.Path
+                yield string sourceFile.IsSignatureFile
                 yield Hashing.toHex sourceFile.Checksum
+
+            for additionalText in snapshot.AdditionalTexts do
+                yield! CacheIdentityParts.additionalTextChecksumParts additionalText CancellationToken.None
+
+            yield! CacheIdentityParts.dictionaryParts snapshot.AnalyzerConfigOptions.GlobalOptions
+
+            for sourceFile in snapshot.SourceFiles do
+                yield sourceFile.Path
+                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath sourceFile.Path |> CacheIdentityParts.dictionaryParts
+
+            for additionalText in snapshot.AdditionalTexts do
+                yield additionalText.Path
+                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath additionalText.Path |> CacheIdentityParts.dictionaryParts
 
             for generatedSource in generatedSources do
                 yield generatedSource.ResolvedPath
@@ -60,12 +96,6 @@ module internal FSharpGeneratorDriverIdentity =
         |> Hashing.sha256Many
 
 module internal FSharpGeneratorRunCacheKey =
-    let private dictionaryParts (values: IReadOnlyDictionary<string, string>) =
-        values
-        |> Seq.map (fun pair -> pair.Key, pair.Value)
-        |> Seq.sortBy fst
-        |> Seq.collect (fun (key, value) -> seq { key; value })
-
     let compute (generators: ImmutableArray<IFSharpIncrementalGenerator>) (options: FSharpGeneratorDriverOptions) (snapshot: FSharpGeneratorProjectSnapshot) (cancellationToken: CancellationToken) =
         seq {
             yield Hashing.toHex (FSharpGeneratorDriverIdentity.compute generators options)
@@ -82,25 +112,16 @@ module internal FSharpGeneratorRunCacheKey =
                 yield Hashing.toHex sourceFile.Checksum
 
             for additionalText in snapshot.AdditionalTexts do
-                yield additionalText.Path
+                yield! CacheIdentityParts.additionalTextChecksumParts additionalText cancellationToken
 
-                match additionalText.Checksum with
-                | Some checksum -> yield Hashing.toHex checksum
-                | None ->
-                    cancellationToken.ThrowIfCancellationRequested()
-
-                    match additionalText.GetText cancellationToken with
-                    | Some sourceText -> yield Hashing.toHex (FSharpSourceText.checksum sourceText)
-                    | None -> yield "<missing>"
-
-            yield! dictionaryParts snapshot.AnalyzerConfigOptions.GlobalOptions
+            yield! CacheIdentityParts.dictionaryParts snapshot.AnalyzerConfigOptions.GlobalOptions
 
             for sourceFile in snapshot.SourceFiles do
                 yield sourceFile.Path
-                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath sourceFile.Path |> dictionaryParts
+                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath sourceFile.Path |> CacheIdentityParts.dictionaryParts
 
             for additionalText in snapshot.AdditionalTexts do
                 yield additionalText.Path
-                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath additionalText.Path |> dictionaryParts
+                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath additionalText.Path |> CacheIdentityParts.dictionaryParts
         }
         |> Hashing.sha256Many
