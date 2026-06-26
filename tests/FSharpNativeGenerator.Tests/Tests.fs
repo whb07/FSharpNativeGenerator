@@ -325,6 +325,15 @@ type CancellationObservingGenerator() =
                         productionContext.ReportDiagnostic(FSharpGeneratorDiagnostic.create "TEST0001" "Cancellation token was visible." Info)))
 
 [<FSharpGenerator>]
+type CancellationThrowingGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    raise (OperationCanceledException(productionContext.CancellationToken))))
+
+[<FSharpGenerator>]
 type SameHintGeneratorA() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
@@ -881,6 +890,26 @@ let ``cancellation token is propagated to source production context`` () =
     let _, result = driver.RunGenerators(snapshot Library [ domain ], cts.Token)
 
     Assert.True(hasDiagnostic "TEST0001" result)
+
+[<Fact>]
+let ``cancelled token before generator run is observed`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    use cts = new CancellationTokenSource()
+    cts.Cancel()
+    let driver = FSharpGeneratorDriver.Create([ ImplementationGenerator("Generated", Prelude) ], options)
+
+    Assert.Throws<OperationCanceledException>(fun () -> driver.RunGenerators(snapshot Library [ domain ], cts.Token) |> ignore)
+
+[<Fact>]
+let ``generator observed cancellation is not converted to diagnostic`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let driver = FSharpGeneratorDriver.Create([ CancellationThrowingGenerator() ], options)
+
+    Assert.Throws<OperationCanceledException>(fun () -> driver.RunGenerators(snapshot Library [ domain ], CancellationToken.None) |> ignore)
 
 [<Fact>]
 let ``same hint names across different generators remain path unique`` () =
