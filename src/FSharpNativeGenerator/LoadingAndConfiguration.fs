@@ -5,6 +5,7 @@ open System.Collections.Generic
 open System.Collections.Immutable
 open System.IO
 open System.Reflection
+open System.Runtime.Loader
 
 type FSharpGeneratorAssemblyLoadResult =
     {
@@ -15,6 +16,28 @@ type FSharpGeneratorAssemblyLoadResult =
 module FSharpGeneratorAssemblyLoader =
     let private error id message =
         FSharpGeneratorDiagnostic.create id message Error
+
+    type private GeneratorAssemblyLoadContext(generatorAssemblyPath: string) =
+        inherit AssemblyLoadContext("FSharpGenerator:" + Path.GetFileName(generatorAssemblyPath), isCollectible = false)
+
+        let generatorDirectory = Path.GetDirectoryName(Path.GetFullPath(generatorAssemblyPath))
+        let sharedAbstractionsAssembly = typeof<IFSharpIncrementalGenerator>.Assembly
+        let generatorAssemblyName = Path.GetFileNameWithoutExtension(generatorAssemblyPath)
+
+        override this.Load(assemblyName: AssemblyName) =
+            if AssemblyName.ReferenceMatchesDefinition(assemblyName, sharedAbstractionsAssembly.GetName()) then
+                sharedAbstractionsAssembly
+            else
+                let localCandidate = Path.Combine(generatorDirectory, assemblyName.Name + ".dll")
+
+                if File.Exists localCandidate then
+                    this.LoadFromAssemblyPath localCandidate
+                else
+                    AppDomain.CurrentDomain.GetAssemblies()
+                    |> Array.tryFind (fun assembly ->
+                        assembly.GetName().Name <> generatorAssemblyName
+                        && AssemblyName.ReferenceMatchesDefinition(assemblyName, assembly.GetName()))
+                    |> Option.defaultValue null
 
     let private isPublicConcrete (candidate: Type) =
         (candidate.IsPublic || candidate.IsNestedPublic) && not candidate.IsAbstract
@@ -27,7 +50,8 @@ module FSharpGeneratorAssemblyLoader =
         let generators = ResizeArray<IFSharpIncrementalGenerator>()
 
         try
-            let assembly = Assembly.LoadFrom(Path.GetFullPath(path))
+            let loadContext = GeneratorAssemblyLoadContext(path)
+            let assembly = loadContext.LoadFromAssemblyPath(Path.GetFullPath(path))
 
             for candidate in assembly.GetTypes() |> Array.filter isPublicConcrete do
                 let hasInterface = implementsGenerator candidate

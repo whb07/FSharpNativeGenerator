@@ -826,6 +826,36 @@ let ``analyzer config option change invalidates cached result`` () =
     Assert.Equal(2, counter.Value)
 
 [<Fact>]
+let ``generator assembly content change invalidates cached result`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let generatorAssembly =
+        Path.Combine(repoRoot (), "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        |> Path.GetFullPath
+    let copiedGeneratorAssembly = fileIn root "FSharpNativeGenerator.TestGenerators.dll"
+
+    Directory.CreateDirectory(root) |> ignore
+    File.Copy(generatorAssembly, copiedGeneratorAssembly)
+
+    let loadResult = FSharpGeneratorAssemblyLoader.loadFromPath copiedGeneratorAssembly
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let project = snapshot Library [ domain ]
+    let driver = FSharpGeneratorDriver.Create(loadResult.Generators, options)
+
+    let updatedDriver, first = driver.RunGenerators(project, CancellationToken.None)
+
+    do
+        use stream = File.Open(copiedGeneratorAssembly, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)
+        stream.WriteByte 0uy
+
+    let _, second = updatedDriver.RunGenerators(project, CancellationToken.None)
+
+    Assert.Empty(loadResult.Diagnostics)
+    Assert.Single(loadResult.Generators) |> ignore
+    Assert.False(first.CacheHit)
+    Assert.False(second.CacheHit)
+
+[<Fact>]
 let ``additional text provider can filter and generate source`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
@@ -968,8 +998,8 @@ let ``assembly loader discovers attributed parameterless generators`` () =
     let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
 
     Assert.Empty(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Severity = Error && diagnostic.Id <> "FSG0002" && diagnostic.Id <> "FSG0015"))
-    Assert.Contains(result.Generators, fun generator -> generator.GetType() = typeof<LoadableGenerator>)
-    Assert.DoesNotContain(result.Generators, fun generator -> generator.GetType() = typeof<UnsupportedApiGenerator>)
+    Assert.Contains(result.Generators, fun generator -> generator.GetType().FullName = typeof<LoadableGenerator>.FullName)
+    Assert.DoesNotContain(result.Generators, fun generator -> generator.GetType().FullName = typeof<UnsupportedApiGenerator>.FullName)
 
 [<Fact>]
 let ``assembly loader reports attributed type without generator interface`` () =
@@ -1309,7 +1339,7 @@ let ``configuration loads generators from configured assembly paths`` () =
 
     let loadResult = FSharpSourceGeneratorConfiguration.loadGenerators result.Configuration
 
-    Assert.Contains(loadResult.Generators, fun generator -> generator.GetType() = typeof<LoadableGenerator>)
+    Assert.Contains(loadResult.Generators, fun generator -> generator.GetType().FullName = typeof<LoadableGenerator>.FullName)
 
 [<Fact>]
 let ``NuGet analyzer folder generator loads from analyzers dotnet fs`` () =
