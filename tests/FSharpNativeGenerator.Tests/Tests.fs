@@ -684,6 +684,25 @@ let ``generated path colliding with original source fails generation`` () =
     Assert.Equal<string array>([| collidingSource |], result.UpdatedSourceFiles |> Seq.toArray)
 
 [<Fact>]
+let ``generated hint sanitization is deterministic across path separators`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let generatedRoot = fileIn root "generated"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = generatedRoot }
+    let result = snapshot Library [ domain ] |> runWith options (ImplementationGenerator("..\\Nested/Client:Type", Prelude))
+
+    Assert.Empty(result.Diagnostics)
+    let generatedSource = Assert.Single(result.GeneratedSources)
+    let relativePath = Path.GetRelativePath(generatedRoot, generatedSource.ResolvedPath)
+    let fileName = Path.GetFileName(generatedSource.ResolvedPath)
+
+    Assert.False(relativePath.StartsWith("..", StringComparison.Ordinal))
+    Assert.DoesNotContain("\\", fileName)
+    Assert.DoesNotContain("/", fileName)
+    Assert.DoesNotContain(":", fileName)
+    Assert.EndsWith(".fs", fileName, StringComparison.Ordinal)
+
+[<Fact>]
 let ``missing anchor fails generation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"

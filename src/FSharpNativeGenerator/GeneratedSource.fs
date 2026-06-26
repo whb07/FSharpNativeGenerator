@@ -10,7 +10,12 @@ open System.Text.RegularExpressions
 
 module internal GeneratedPaths =
     let private invalidChars =
-        Path.GetInvalidFileNameChars()
+        Array.concat
+            [
+                Path.GetInvalidFileNameChars()
+                [| '<'; '>'; ':'; '"'; '/'; '\\'; '|'; '?'; '*' |]
+            ]
+        |> Array.distinct
         |> String
         |> Regex.Escape
 
