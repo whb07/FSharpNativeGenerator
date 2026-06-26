@@ -641,6 +641,24 @@ let ``source content change invalidates cached result`` () =
     Assert.Equal(2, counter.Value)
 
 [<Fact>]
+let ``source file order change invalidates cached result`` () =
+    let root = tempRoot ()
+    let firstSource = fileIn root "First.fs"
+    let secondSource = fileIn root "Second.fs"
+    let counter = ref 0
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let firstProject = snapshot Library [ firstSource; secondSource ]
+    let secondProject = snapshot Library [ secondSource; firstSource ]
+    let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
+
+    let updatedDriver, first = driver.RunGenerators(firstProject, CancellationToken.None)
+    let _, second = updatedDriver.RunGenerators(secondProject, CancellationToken.None)
+
+    Assert.False(first.CacheHit)
+    Assert.False(second.CacheHit)
+    Assert.Equal(2, counter.Value)
+
+[<Fact>]
 let ``additional file checksum change invalidates cached result`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
