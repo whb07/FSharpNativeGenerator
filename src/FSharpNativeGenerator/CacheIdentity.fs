@@ -43,13 +43,16 @@ module internal CacheIdentityParts =
             None
 
     let private referencePaths (projectOptions: FSharpProjectOptions) =
+        let isSplitReferenceOption option =
+            String.Equals(option, "--reference", StringComparison.OrdinalIgnoreCase)
+            || String.Equals(option, "-r", StringComparison.OrdinalIgnoreCase)
+            || String.Equals(option, "/reference", StringComparison.OrdinalIgnoreCase)
+            || String.Equals(option, "/r", StringComparison.OrdinalIgnoreCase)
+
         let rec loop remainingOptions paths =
             match remainingOptions with
             | [] -> List.rev paths
-            | option :: value :: tail when
-                String.Equals(option, "--reference", StringComparison.OrdinalIgnoreCase)
-                || String.Equals(option, "-r", StringComparison.OrdinalIgnoreCase)
-                ->
+            | option :: value :: tail when isSplitReferenceOption option ->
                 loop tail (normalizeProjectPath projectOptions value :: paths)
             | option :: tail ->
                 let referencePath =

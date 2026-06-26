@@ -2380,6 +2380,25 @@ let ``equals referenced assembly option updates project cache identity`` () =
 
     Assert.NotEqual<byte seq>(identityA, identityB)
 
+[<Theory>]
+[<InlineData("/reference")>]
+[<InlineData("/r")>]
+let ``slash split referenced assembly option updates project cache identity`` referenceOption =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let referencePath = fileIn root "Reference.dll"
+
+    writeBytes referencePath [| 1uy; 2uy; 3uy |]
+
+    let project =
+        snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; referenceOption; referencePath ]
+
+    let identityA = FSharpProjectCacheIdentity.compute project []
+    writeBytes referencePath [| 4uy; 5uy; 6uy |]
+    let identityB = FSharpProjectCacheIdentity.compute project []
+
+    Assert.NotEqual<byte seq>(identityA, identityB)
+
 [<Fact>]
 let ``additional text change updates project cache identity`` () =
     let root = tempRoot ()
