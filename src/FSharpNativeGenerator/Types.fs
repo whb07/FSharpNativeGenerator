@@ -113,7 +113,9 @@ module FSharpSourceFileSnapshot =
         cancellationToken.ThrowIfCancellationRequested()
 
         match tryGetGeneratedText path with
-        | Some generatedText -> Some(createFromSourceText path generatedText)
+        | Some generatedText when not (obj.ReferenceEquals(generatedText, null)) ->
+            Some(createFromSourceText path generatedText)
+        | Some _ -> None
         | None ->
             let fullPath = Path.GetFullPath(path)
 

@@ -894,6 +894,23 @@ let ``source snapshot loading reports unresolved paths`` () =
     Assert.Empty(loadResult.SourceFiles)
 
 [<Fact>]
+let ``source snapshot loading reports null generated text as unresolved`` () =
+    let root = tempRoot ()
+    let generated = fileIn root "Generated.fs"
+    let project = snapshot Library [ generated ]
+
+    let loadResult =
+        FSharpSourceFileSnapshot.loadProjectSourceFiles
+            project.ProjectOptions
+            (fun _ -> Some(Unchecked.defaultof<FSharpSourceText>))
+            CancellationToken.None
+
+    let diagnostic = Assert.Single(loadResult.Diagnostics)
+    Assert.Equal("FSG0011", diagnostic.Id)
+    Assert.Equal(Some generated, diagnostic.FilePath)
+    Assert.Empty(loadResult.SourceFiles)
+
+[<Fact>]
 let ``after file placement inserts generated source before later consumers`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
