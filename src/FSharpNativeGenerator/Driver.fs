@@ -185,6 +185,17 @@ type FSharpGeneratorDriver
                     )
 
                     None
+                elif obj.ReferenceEquals(source.SourceText, null) then
+                    diagnostics.Add(
+                        Diagnostics.error
+                            "FSG0011"
+                            (sprintf
+                                "Generator '%s' emitted null source text for hint name '%s'."
+                                source.GeneratorName
+                                source.HintName)
+                    )
+
+                    None
                 elif GeneratedPaths.conflictsWithKind source.Kind source.HintName then
                     diagnostics.Add(
                         Diagnostics.error

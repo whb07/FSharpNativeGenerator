@@ -640,6 +640,20 @@ type InvalidSourceGenerator(hintName: string, source: string) =
             )
 
 [<FSharpGenerator>]
+type NullSourceTextGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    productionContext.AddImplementationSource(
+                        "NullText",
+                        Unchecked.defaultof<FSharpSourceText>,
+                        Prelude
+                    ))
+            )
+
+[<FSharpGenerator>]
 type ReportingDiagnosticGenerator(severity: FSharpDiagnosticSeverity) =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
@@ -1462,6 +1476,24 @@ let ``empty generated source reports generated file path`` () =
         )
 
     Assert.Contains("Empty.fs", diagnostic.FilePath.Value)
+    Assert.Empty(result.GeneratedSources)
+
+[<Fact>]
+let ``null generated source text fails generation without crashing`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ] |> runWith options (NullSourceTextGenerator())
+
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+
+    Assert.Contains("null source text", diagnostic.Message, StringComparison.OrdinalIgnoreCase)
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
