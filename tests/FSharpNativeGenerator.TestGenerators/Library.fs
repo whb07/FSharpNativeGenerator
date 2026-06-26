@@ -45,3 +45,17 @@ type CliSourceTextGenerator() =
                         Prelude
                     ))
             )
+
+[<FSharpGenerator>]
+type CliEndOfProjectGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    productionContext.AddImplementationSource(
+                        "CliEndOfProject",
+                        FSharpSourceText.OfString("module CliEndOfProject\nlet value = 1"),
+                        EndOfProject
+                    ))
+            )

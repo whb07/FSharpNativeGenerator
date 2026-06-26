@@ -24,11 +24,36 @@ Generator options:
         argument.EndsWith(".fs", StringComparison.OrdinalIgnoreCase)
         || argument.EndsWith(".fsi", StringComparison.OrdinalIgnoreCase)
 
+    let private tryPrefixedValue (prefix: string) (value: string) =
+        if value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) then
+            let suffix = value.Substring(prefix.Length)
+
+            if String.IsNullOrWhiteSpace suffix then
+                None
+            else
+                Some suffix
+        else
+            None
+
+    let private isApplicationTarget (value: string) =
+        String.Equals(value, "exe", StringComparison.OrdinalIgnoreCase)
+        || String.Equals(value, "winexe", StringComparison.OrdinalIgnoreCase)
+
     let private outputKindFromArgs (arguments: seq<string>) =
-        if
-            arguments
-            |> Seq.exists (fun argument -> argument.Equals("--target:exe", StringComparison.OrdinalIgnoreCase))
-        then
+        let rec hasApplicationTarget remainingArguments =
+            match remainingArguments with
+            | [] -> false
+            | option :: value :: tail when String.Equals(option, "--target", StringComparison.OrdinalIgnoreCase) ->
+                isApplicationTarget value || hasApplicationTarget tail
+            | argument :: tail ->
+                match
+                    tryPrefixedValue "--target:" argument
+                    |> Option.orElseWith (fun () -> tryPrefixedValue "--target=" argument)
+                with
+                | Some value -> isApplicationTarget value || hasApplicationTarget tail
+                | None -> hasApplicationTarget tail
+
+        if hasApplicationTarget (arguments |> Seq.toList) then
             Application
         else
             Library

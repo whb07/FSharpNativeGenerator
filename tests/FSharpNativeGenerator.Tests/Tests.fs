@@ -2627,6 +2627,42 @@ let ``CLI reports missing source files`` () =
     Assert.Contains(missing, error)
 
 [<Fact>]
+let ``CLI treats split winexe target as application for placement rules`` () =
+    let root = tempRoot ()
+    let consumer = fileIn root "Consumer.fs"
+    let repositoryRoot = repoRoot ()
+
+    let cliProject =
+        Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj")
+        |> Path.GetFullPath
+
+    let generatorAssembly =
+        Path.Combine(
+            repositoryRoot,
+            "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll"
+        )
+        |> Path.GetFullPath
+
+    writeFile consumer "module Consumer\nlet value = 1"
+
+    let arguments =
+        String.concat
+            " "
+            [ "run"
+              "--project"
+              "\"" + cliProject + "\""
+              "--"
+              "--target"
+              "winexe"
+              "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
+              "\"" + consumer + "\"" ]
+
+    let exitCode, _, error = runProcess "dotnet" arguments root
+
+    Assert.Equal(1, exitCode)
+    Assert.Contains("FSG0012", error)
+
+[<Fact>]
 let ``CLI passes analyzer config options to loaded generators`` () =
     let root = tempRoot ()
     let consumer = fileIn root "Consumer.fs"
