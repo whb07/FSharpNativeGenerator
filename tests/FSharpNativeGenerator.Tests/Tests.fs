@@ -1086,6 +1086,30 @@ let ``report path writes generated source and diagnostic summary`` () =
     Assert.Equal(result.GeneratedSources.[0].ResolvedPath, firstGeneratedSource.GetProperty("ResolvedPath").GetString())
 
 [<Fact>]
+let ``report path is updated for cached generator runs`` () =
+    let root = tempRoot ()
+    let reportPath = fileIn root "reports/generator.json"
+    let domain = fileIn root "Domain.fs"
+    let options =
+        {
+            FSharpGeneratorDriverOptions.defaults with
+                GeneratedRoot = fileIn root "generated"
+                ReportPath = Some reportPath
+        }
+
+    let project = snapshot Library [ domain ]
+    let driver = FSharpGeneratorDriver.Create([ ImplementationGenerator("Generated", Prelude) ], options)
+
+    let updatedDriver, first = driver.RunGenerators(project, CancellationToken.None)
+    let _, second = updatedDriver.RunGenerators(project, CancellationToken.None)
+
+    Assert.False(first.CacheHit)
+    Assert.True(second.CacheHit)
+
+    use report = JsonDocument.Parse(File.ReadAllText(reportPath))
+    Assert.True(report.RootElement.GetProperty("CacheHit").GetBoolean())
+
+[<Fact>]
 let ``generated ordered source list builds in a real FSharp project`` () =
     let root = tempRoot ()
     let generatedRoot = fileIn root "generated"

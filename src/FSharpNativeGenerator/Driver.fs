@@ -268,6 +268,7 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
         match runCacheEntry with
         | Some entry when entry.Key = cacheKey ->
             let cachedResult = { entry.Result with CacheHit = true; ElapsedMilliseconds = stopwatch.ElapsedMilliseconds }
+            options.ReportPath |> Option.iter (fun path -> RunReport.write path cachedResult)
             updatedDriver, cachedResult
         | _ -> runFresh ()
 
