@@ -455,10 +455,13 @@ let ``duplicate hint names fail generation`` () =
 let ``missing anchor fails generation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
+    let missing = fileIn root "Missing.fs"
     let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (ImplementationGenerator("BeforeMissing", BeforeFile(fileIn root "Missing.fs")))
+    let result = snapshot Library [ domain ] |> runWith options (ImplementationGenerator("BeforeMissing", BeforeFile missing))
 
-    Assert.True(hasDiagnostic "FSG0007" result)
+    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0007"))
+    Assert.Contains("BeforeMissing", diagnostic.Message)
+    Assert.Contains(missing, diagnostic.Message)
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
@@ -470,6 +473,7 @@ let ``generated anchor cycle fails generation`` () =
     let result = snapshot Library [ domain ] |> runWith options (CyclicAnchorGenerator(generatedRoot))
 
     Assert.True(hasDiagnostic "FSG0009" result)
+    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0009" && diagnostic.Message.Contains("Generated source 'A'", StringComparison.Ordinal)))
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]

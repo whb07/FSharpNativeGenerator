@@ -134,6 +134,12 @@ module internal Placement =
         |> List.tryLast
         |> Option.map fst
 
+    let private hintList units =
+        units
+        |> List.collect _.Sources
+        |> List.map _.HintName
+        |> String.concat ", "
+
     let private normalizedHint hintName =
         GeneratedPaths.stripKnownExtension hintName
         |> _.ToUpperInvariant()
@@ -223,7 +229,7 @@ module internal Placement =
             for unit in beforeLast do
                 ordered <- insertAt adjustedIndex unit.Paths ordered
         | None ->
-            diagnostics.Add(Diagnostics.error "FSG0007" "BeforeLastSourceFile could not be resolved because the project has no implementation source file.")
+            diagnostics.Add(Diagnostics.error "FSG0007" (sprintf "BeforeLastSourceFile placement for generated source '%s' could not be resolved because the project has no implementation source file." (hintList beforeLast)))
 
         match outputKind, endOfProject with
         | Application, _ :: _ ->
@@ -262,7 +268,7 @@ module internal Placement =
             | BeforeFile anchorPath
             | AfterFile anchorPath ->
                 let id = if generatedPathSet.Contains(Path.GetFullPath(anchorPath)) then "FSG0009" else "FSG0007"
-                diagnostics.Add(Diagnostics.error id (sprintf "Generated source anchor '%s' could not be resolved." anchorPath))
+                diagnostics.Add(Diagnostics.error id (sprintf "Generated source '%s' anchor '%s' could not be resolved." (hintList [ unit ]) anchorPath))
             | _ -> ()
 
         ordered |> ImmutableArray.CreateRange, diagnostics |> Seq.toList
