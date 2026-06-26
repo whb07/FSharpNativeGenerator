@@ -137,7 +137,10 @@ module internal GeneratedSourceValidation =
 
     let private conditionalDefines (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions) =
         let values =
-            parseOptionValues (set [ "--DEFINE"; "-D" ]) [ "--define:"; "-d:" ] projectOptions.OtherOptions
+            parseOptionValues
+                (set [ "--DEFINE"; "-D"; "/DEFINE"; "/D" ])
+                [ "--define:"; "--define="; "-d:"; "-d="; "/define:"; "/define="; "/d:"; "/d=" ]
+                projectOptions.OtherOptions
 
         values
         |> List.collect (fun value ->
@@ -145,7 +148,10 @@ module internal GeneratedSourceValidation =
             |> Array.toList)
 
     let private languageVersion (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions) =
-        parseOptionValues (set [ "--LANGVERSION" ]) [ "--langversion:" ] projectOptions.OtherOptions
+        parseOptionValues
+            (set [ "--LANGVERSION"; "/LANGVERSION" ])
+            [ "--langversion:"; "--langversion="; "/langversion:"; "/langversion=" ]
+            projectOptions.OtherOptions
         |> List.tryLast
 
     let private parsingOptions

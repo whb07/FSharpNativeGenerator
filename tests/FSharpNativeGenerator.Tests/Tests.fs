@@ -1343,6 +1343,50 @@ let ``generated source parser observes project conditional defines`` () =
     Assert.Single(result.GeneratedSources) |> ignore
 
 [<Fact>]
+let ``generated source parser observes equals conditional defines`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project =
+        snapshotWithOtherOptions Library [ domain ] [ "--define=GENERATED_OK" ]
+
+    let source =
+        "module ConditionalGenerated\n#if GENERATED_OK\nlet value = 1\n#else\nlet value =\n#endif"
+
+    let result =
+        project
+        |> runWith options (InvalidSourceGenerator("ConditionalGenerated", source))
+
+    Assert.Empty(result.Diagnostics)
+    Assert.Single(result.GeneratedSources) |> ignore
+
+[<Fact>]
+let ``generated source parser observes split conditional define lists`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project =
+        snapshotWithOtherOptions Library [ domain ] [ "--define"; "GENERATED_OK,SECOND_DEFINE" ]
+
+    let source =
+        "module ConditionalGenerated\n#if GENERATED_OK && SECOND_DEFINE\nlet value = 1\n#else\nlet value =\n#endif"
+
+    let result =
+        project
+        |> runWith options (InvalidSourceGenerator("ConditionalGenerated", source))
+
+    Assert.Empty(result.Diagnostics)
+    Assert.Single(result.GeneratedSources) |> ignore
+
+[<Fact>]
 let ``source snapshot count mismatch fails generation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
