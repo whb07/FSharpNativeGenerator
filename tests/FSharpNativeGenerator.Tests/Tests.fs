@@ -1289,6 +1289,33 @@ let ``split compiler output option is used for generator assembly validation`` (
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
+let ``slash compiler output option is used for generator assembly validation`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+
+    let generatorAssemblyPath =
+        Path.GetFullPath typeof<ImplementationGenerator>.Assembly.Location
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project =
+        snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "/out"; generatorAssemblyPath ]
+
+    let result =
+        project |> runWith options (ImplementationGenerator("Generated", Prelude))
+
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic ->
+            diagnostic.Id = "FSG0002"
+            && diagnostic.Message.Contains(generatorAssemblyPath, StringComparison.OrdinalIgnoreCase))
+    )
+
+    Assert.Empty(result.GeneratedSources)
+
+[<Fact>]
 let ``equals compiler output option is used for generator assembly validation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"

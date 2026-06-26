@@ -48,6 +48,7 @@ module private ProjectOutputPath =
             | option :: value :: _ when
                 String.Equals(option, "--out", StringComparison.OrdinalIgnoreCase)
                 || String.Equals(option, "-o", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(option, "/out", StringComparison.OrdinalIgnoreCase)
                 ->
                 Some value
             | option :: tail ->
