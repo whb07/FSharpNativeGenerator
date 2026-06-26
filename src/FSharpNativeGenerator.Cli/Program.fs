@@ -25,7 +25,10 @@ Generator options:
         || argument.EndsWith(".fsi", StringComparison.OrdinalIgnoreCase)
 
     let private outputKindFromArgs (arguments: seq<string>) =
-        if arguments |> Seq.exists (fun argument -> argument.Equals("--target:exe", StringComparison.OrdinalIgnoreCase)) then
+        if
+            arguments
+            |> Seq.exists (fun argument -> argument.Equals("--target:exe", StringComparison.OrdinalIgnoreCase))
+        then
             Application
         else
             Library
@@ -37,7 +40,12 @@ Generator options:
     [<EntryPoint>]
     let main argv =
         let parsed = FSharpSourceGeneratorConfiguration.parseCommandLineArguments argv
-        let sourceFiles = parsed.RemainingArguments |> Seq.filter isSourcePath |> Seq.map Path.GetFullPath |> ImmutableArray.CreateRange
+
+        let sourceFiles =
+            parsed.RemainingArguments
+            |> Seq.filter isSourcePath
+            |> Seq.map Path.GetFullPath
+            |> ImmutableArray.CreateRange
 
         if sourceFiles.IsDefaultOrEmpty then
             eprintf "%s" usage
@@ -46,34 +54,42 @@ Generator options:
             parsed.Diagnostics |> Seq.iter printDiagnostic
             1
         else
-            let loadResult = FSharpSourceGeneratorConfiguration.loadGenerators parsed.Configuration
+            let loadResult =
+                FSharpSourceGeneratorConfiguration.loadGenerators parsed.Configuration
+
             let loadDiagnostics = loadResult.Diagnostics
-            let additionalTextsResult = FSharpSourceGeneratorConfiguration.additionalTextsWithDiagnostics parsed.Configuration
-            let analyzerConfigResult = FSharpSourceGeneratorConfiguration.analyzerConfigOptions parsed.Configuration
+
+            let additionalTextsResult =
+                FSharpSourceGeneratorConfiguration.additionalTextsWithDiagnostics parsed.Configuration
+
+            let analyzerConfigResult =
+                FSharpSourceGeneratorConfiguration.analyzerConfigOptions parsed.Configuration
 
             let configurationDiagnostics =
                 Seq.concat
-                    [
-                        loadDiagnostics :> seq<_>
-                        additionalTextsResult.Diagnostics :> seq<_>
-                        analyzerConfigResult.Diagnostics :> seq<_>
-                    ]
+                    [ loadDiagnostics :> seq<_>
+                      additionalTextsResult.Diagnostics :> seq<_>
+                      analyzerConfigResult.Diagnostics :> seq<_> ]
 
-            if configurationDiagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
+            if
+                configurationDiagnostics
+                |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error)
+            then
                 loadDiagnostics |> Seq.iter printDiagnostic
                 additionalTextsResult.Diagnostics |> Seq.iter printDiagnostic
                 analyzerConfigResult.Diagnostics |> Seq.iter printDiagnostic
                 1
             else
                 let projectOptions =
-                    {
-                        ProjectFilePath = Path.Combine(Environment.CurrentDirectory, "FSharpNativeGenerator.Cli.fsproj")
-                        ProjectId = Some "FSharpNativeGenerator.Cli"
-                        SourceFiles = sourceFiles
-                        OtherOptions = parsed.RemainingArguments |> Seq.filter (isSourcePath >> not) |> ImmutableArray.CreateRange
-                        OutputKind = outputKindFromArgs parsed.RemainingArguments
-                        Stamp = None
-                    }
+                    { ProjectFilePath = Path.Combine(Environment.CurrentDirectory, "FSharpNativeGenerator.Cli.fsproj")
+                      ProjectId = Some "FSharpNativeGenerator.Cli"
+                      SourceFiles = sourceFiles
+                      OtherOptions =
+                        parsed.RemainingArguments
+                        |> Seq.filter (isSourcePath >> not)
+                        |> ImmutableArray.CreateRange
+                      OutputKind = outputKindFromArgs parsed.RemainingArguments
+                      Stamp = None }
 
                 let sourceFilesResult =
                     FSharpSourceFileSnapshot.loadProjectSourceFiles
@@ -81,19 +97,22 @@ Generator options:
                         (fun _ -> None)
                         CancellationToken.None
 
-                if sourceFilesResult.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
+                if
+                    sourceFilesResult.Diagnostics
+                    |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error)
+                then
                     sourceFilesResult.Diagnostics |> Seq.iter printDiagnostic
                     1
                 else
                     let snapshot =
-                        {
-                            ProjectOptions = projectOptions
-                            SourceFiles = sourceFilesResult.SourceFiles
-                            AdditionalTexts = additionalTextsResult.AdditionalTexts
-                            AnalyzerConfigOptions = analyzerConfigResult.Options
-                        }
+                        { ProjectOptions = projectOptions
+                          SourceFiles = sourceFilesResult.SourceFiles
+                          AdditionalTexts = additionalTextsResult.AdditionalTexts
+                          AnalyzerConfigOptions = analyzerConfigResult.Options }
 
-                    let driver = FSharpGeneratorDriver.Create(loadResult.Generators, parsed.Configuration.DriverOptions)
+                    let driver =
+                        FSharpGeneratorDriver.Create(loadResult.Generators, parsed.Configuration.DriverOptions)
+
                     let _, result = driver.RunGenerators(snapshot, CancellationToken.None)
 
                     result.Diagnostics |> Seq.iter printDiagnostic

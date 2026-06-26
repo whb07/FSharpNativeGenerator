@@ -11,11 +11,9 @@ open System.Threading
 open FSharp.Compiler.SourceGeneration
 open Xunit
 
-let private text value =
-    FSharpSourceText.OfString value
+let private text value = FSharpSourceText.OfString value
 
-let private immutableArray values =
-    ImmutableArray.CreateRange values
+let private immutableArray values = ImmutableArray.CreateRange values
 
 let private tempRoot () =
     Path.Combine(Path.GetTempPath(), "FSharpNativeGenerator.Tests", Guid.NewGuid().ToString("N"))
@@ -38,86 +36,70 @@ let private snapshot outputKind sourceFiles =
     let sourceFiles = sourceFiles |> List.map Path.GetFullPath
 
     let projectOptions =
-        {
-            ProjectFilePath = fileIn (tempRoot ()) "App.fsproj"
-            ProjectId = Some "test-project"
-            SourceFiles = immutableArray sourceFiles
-            OtherOptions = immutableArray [ "--define:TEST" ]
-            OutputKind = outputKind
-            Stamp = None
-        }
+        { ProjectFilePath = fileIn (tempRoot ()) "App.fsproj"
+          ProjectId = Some "test-project"
+          SourceFiles = immutableArray sourceFiles
+          OtherOptions = immutableArray [ "--define:TEST" ]
+          OutputKind = outputKind
+          Stamp = None }
 
-    {
-        ProjectOptions = projectOptions
-        SourceFiles =
-            sourceFiles
-            |> List.map (fun path -> FSharpSourceFileSnapshot.create path "module UserCode")
-            |> immutableArray
-        AdditionalTexts = ImmutableArray<FSharpAdditionalText>.Empty
-        AnalyzerConfigOptions =
-            {
-                GlobalOptions = Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
-                GetOptionsForPath = fun _ -> Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
-            }
-    }
+    { ProjectOptions = projectOptions
+      SourceFiles =
+        sourceFiles
+        |> List.map (fun path -> FSharpSourceFileSnapshot.create path "module UserCode")
+        |> immutableArray
+      AdditionalTexts = ImmutableArray<FSharpAdditionalText>.Empty
+      AnalyzerConfigOptions =
+        { GlobalOptions = Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
+          GetOptionsForPath = fun _ -> Dictionary<string, string>() :> IReadOnlyDictionary<string, string> } }
 
 let private snapshotWithSourceContents outputKind sourceFiles =
     let baseSnapshot = snapshot outputKind (sourceFiles |> List.map fst)
 
-    {
-        baseSnapshot with
-            SourceFiles =
-                sourceFiles
-                |> List.map (fun (path, content) -> FSharpSourceFileSnapshot.create path content)
-                |> immutableArray
-    }
+    { baseSnapshot with
+        SourceFiles =
+            sourceFiles
+            |> List.map (fun (path, content) -> FSharpSourceFileSnapshot.create path content)
+            |> immutableArray }
 
 let private snapshotWithAdditional outputKind sourceFiles additionalTexts =
     let baseSnapshot = snapshot outputKind sourceFiles
 
-    {
-        baseSnapshot with
-            AdditionalTexts =
-                additionalTexts
-                |> List.map (fun (path, content) ->
-                    {
-                        Path = Path.GetFullPath(path)
-                        GetText = fun _ -> Some(text content)
-                        Checksum = Some(FSharpSourceText.checksum (text content))
-                    })
-                |> immutableArray
-    }
+    { baseSnapshot with
+        AdditionalTexts =
+            additionalTexts
+            |> List.map (fun (path, content) ->
+                { Path = Path.GetFullPath(path)
+                  GetText = fun _ -> Some(text content)
+                  Checksum = Some(FSharpSourceText.checksum (text content)) })
+            |> immutableArray }
 
 let private snapshotWithAnalyzerOptions outputKind sourceFiles (globalOptions: seq<KeyValuePair<string, string>>) =
     let baseSnapshot = snapshot outputKind sourceFiles
 
-    {
-        baseSnapshot with
-            AnalyzerConfigOptions =
-                {
-                    GlobalOptions = Dictionary<string, string>(globalOptions) :> IReadOnlyDictionary<string, string>
-                    GetOptionsForPath = fun _ -> Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
-                }
-    }
+    { baseSnapshot with
+        AnalyzerConfigOptions =
+            { GlobalOptions = Dictionary<string, string>(globalOptions) :> IReadOnlyDictionary<string, string>
+              GetOptionsForPath = fun _ -> Dictionary<string, string>() :> IReadOnlyDictionary<string, string> } }
 
 let private snapshotWithOtherOptions outputKind sourceFiles otherOptions =
     let baseSnapshot = snapshot outputKind sourceFiles
 
-    {
-        baseSnapshot with
-            ProjectOptions =
-                {
-                    baseSnapshot.ProjectOptions with
-                        OtherOptions = immutableArray otherOptions
-                }
-    }
+    { baseSnapshot with
+        ProjectOptions =
+            { baseSnapshot.ProjectOptions with
+                OtherOptions = immutableArray otherOptions } }
 
 let private writeFile path (content: string) =
-    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))) |> ignore
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)))
+    |> ignore
+
     File.WriteAllText(path, content)
 
 let private runDotnetBuild (projectPath: string) =
-    let startInfo: ProcessStartInfo = ProcessStartInfo("dotnet", "build \"" + projectPath + "\" --nologo")
+    let startInfo: ProcessStartInfo =
+        ProcessStartInfo("dotnet", "build \"" + projectPath + "\" --nologo")
+
     startInfo.RedirectStandardOutput <- true
     startInfo.RedirectStandardError <- true
     startInfo.UseShellExecute <- false
@@ -175,8 +157,7 @@ let private generatedPath root (generatorType: Type) kind hint =
         | Implementation -> ".fs"
         | Signature -> ".fsi"
 
-    Path.Combine(root, generatorType.FullName, hint + extension)
-    |> Path.GetFullPath
+    Path.Combine(root, generatorType.FullName, hint + extension) |> Path.GetFullPath
 
 [<FSharpGenerator>]
 type ImplementationGenerator(hintName: string, placement: FSharpGeneratedSourcePlacement) =
@@ -185,7 +166,8 @@ type ImplementationGenerator(hintName: string, placement: FSharpGeneratedSourceP
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddImplementationSource(hintName, text "module Generated", placement)))
+                    productionContext.AddImplementationSource(hintName, text "module Generated", placement))
+            )
 
 [<FSharpGenerator>]
 type SignaturePairGenerator(placement: FSharpGeneratedSourcePlacement) =
@@ -194,8 +176,15 @@ type SignaturePairGenerator(placement: FSharpGeneratedSourcePlacement) =
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddSignatureSource("ClientSig", text "module Generated.Client", "Client", placement)
-                    productionContext.AddImplementationSource("Client", text "module Generated.Client", placement)))
+                    productionContext.AddSignatureSource(
+                        "ClientSig",
+                        text "module Generated.Client",
+                        "Client",
+                        placement
+                    )
+
+                    productionContext.AddImplementationSource("Client", text "module Generated.Client", placement))
+            )
 
 [<FSharpGenerator>]
 type MultipleSignatureCompanionsGenerator() =
@@ -204,9 +193,26 @@ type MultipleSignatureCompanionsGenerator() =
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddSignatureSource("ClientSigA", text "module Generated.Client\nval value: int", "Client", Prelude)
-                    productionContext.AddSignatureSource("ClientSigB", text "module Generated.Client\nval value: int", "Client", Prelude)
-                    productionContext.AddImplementationSource("Client", text "module Generated.Client\nlet value = 1", Prelude)))
+                    productionContext.AddSignatureSource(
+                        "ClientSigA",
+                        text "module Generated.Client\nval value: int",
+                        "Client",
+                        Prelude
+                    )
+
+                    productionContext.AddSignatureSource(
+                        "ClientSigB",
+                        text "module Generated.Client\nval value: int",
+                        "Client",
+                        Prelude
+                    )
+
+                    productionContext.AddImplementationSource(
+                        "Client",
+                        text "module Generated.Client\nlet value = 1",
+                        Prelude
+                    ))
+            )
 
 [<FSharpGenerator>]
 type MissingSignatureCompanionGenerator() =
@@ -215,7 +221,13 @@ type MissingSignatureCompanionGenerator() =
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddSignatureSource("ClientSig", text "module Generated.Client", "MissingClient", Prelude)))
+                    productionContext.AddSignatureSource(
+                        "ClientSig",
+                        text "module Generated.Client",
+                        "MissingClient",
+                        Prelude
+                    ))
+            )
 
 [<FSharpGenerator>]
 type UserImplementationSignatureGenerator() =
@@ -224,13 +236,18 @@ type UserImplementationSignatureGenerator() =
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddSignatureSource("Domain", text "module Domain\nval value: int", "Domain", Prelude)))
+                    productionContext.AddSignatureSource(
+                        "Domain",
+                        text "module Domain\nval value: int",
+                        "Domain",
+                        Prelude
+                    ))
+            )
 
 [<FSharpGenerator>]
 type ThrowingInitializationGenerator() =
     interface IFSharpIncrementalGenerator with
-        member _.Initialize _ =
-            invalidOp "boom"
+        member _.Initialize _ = invalidOp "boom"
 
 [<FSharpGenerator>]
 type ThrowingExecutionGenerator() =
@@ -238,12 +255,12 @@ type ThrowingExecutionGenerator() =
         member _.Initialize context =
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
-                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun _ _ -> invalidOp "boom"))
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun _ _ -> invalidOp "boom")
+            )
 
 type UnmarkedGenerator() =
     interface IFSharpIncrementalGenerator with
-        member _.Initialize _ =
-            ()
+        member _.Initialize _ = ()
 
 [<FSharpGenerator>]
 type CyclicAnchorGenerator(root: string) =
@@ -257,7 +274,8 @@ type CyclicAnchorGenerator(root: string) =
                     let pathB = generatedPath root generatorType Implementation "B"
 
                     productionContext.AddImplementationSource("A", text "module A", BeforeFile pathB)
-                    productionContext.AddImplementationSource("B", text "module B", BeforeFile pathA)))
+                    productionContext.AddImplementationSource("B", text "module B", BeforeFile pathA))
+            )
 
 [<FSharpGenerator>]
 type DuplicateHintGenerator() =
@@ -267,7 +285,8 @@ type DuplicateHintGenerator() =
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
                     productionContext.AddImplementationSource("Dup", text "module A", Prelude)
-                    productionContext.AddImplementationSource("Dup", text "module B", Prelude)))
+                    productionContext.AddImplementationSource("Dup", text "module B", Prelude))
+            )
 
 [<FSharpGenerator>]
 type DuplicateResolvedPathGenerator() =
@@ -277,48 +296,41 @@ type DuplicateResolvedPathGenerator() =
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
                     productionContext.AddImplementationSource("Client", text "module Client", Prelude)
-                    productionContext.AddImplementationSource("Client.fs", text "module ClientFile", Prelude)))
+                    productionContext.AddImplementationSource("Client.fs", text "module ClientFile", Prelude))
+            )
 
 [<FSharpGenerator>]
 type NoOutputGeneratorA() =
     interface IFSharpIncrementalGenerator with
-        member _.Initialize _ =
-            ()
+        member _.Initialize _ = ()
 
 [<FSharpGenerator>]
 type NoOutputGeneratorB() =
     interface IFSharpIncrementalGenerator with
-        member _.Initialize _ =
-            ()
+        member _.Initialize _ = ()
 
 [<FSharpGenerator(999)>]
 type UnsupportedApiGenerator() =
     interface IFSharpIncrementalGenerator with
-        member _.Initialize _ =
-            ()
+        member _.Initialize _ = ()
 
 [<FSharpGenerator>]
 type LoadableGenerator() =
     interface IFSharpIncrementalGenerator with
-        member _.Initialize _ =
-            ()
+        member _.Initialize _ = ()
 
 [<FSharpGenerator>]
-type InvalidAttributedType() =
-    class
-    end
+type InvalidAttributedType() = class end
 
 [<AbstractClass; FSharpGenerator>]
 type AbstractAttributedGenerator() =
     interface IFSharpIncrementalGenerator with
-        member _.Initialize _ =
-            ()
+        member _.Initialize _ = ()
 
 [<FSharpGenerator>]
 type private PrivateAttributedGenerator() =
     interface IFSharpIncrementalGenerator with
-        member _.Initialize _ =
-            ()
+        member _.Initialize _ = ()
 
 [<FSharpGenerator>]
 type AdditionalTextGenerator() =
@@ -326,15 +338,18 @@ type AdditionalTextGenerator() =
         member _.Initialize context =
             let schemas =
                 context.AdditionalTextsProvider
-                |> FSharpIncrementalValuesProvider.filter (fun additional -> additional.Path.EndsWith(".schema", StringComparison.OrdinalIgnoreCase))
+                |> FSharpIncrementalValuesProvider.filter (fun additional ->
+                    additional.Path.EndsWith(".schema", StringComparison.OrdinalIgnoreCase))
                 |> FSharpIncrementalValuesProvider.choose (fun additional ->
                     additional.GetText CancellationToken.None
                     |> Option.map (fun sourceText -> Path.GetFileNameWithoutExtension(additional.Path), sourceText))
 
             context.RegisterSourceOutput(
                 schemas,
-                Action<FSharpSourceProductionContext, string * FSharpSourceText>(fun productionContext (hintName, sourceText) ->
-                    productionContext.AddImplementationSource(hintName, sourceText, Prelude)))
+                Action<FSharpSourceProductionContext, string * FSharpSourceText>
+                    (fun productionContext (hintName, sourceText) ->
+                        productionContext.AddImplementationSource(hintName, sourceText, Prelude))
+            )
 
 [<FSharpGenerator>]
 type SourceFilesEchoGenerator() =
@@ -342,12 +357,14 @@ type SourceFilesEchoGenerator() =
         member _.Initialize context =
             let sourceModuleNames =
                 context.SourceFilesProvider
-                |> FSharpIncrementalValuesProvider.map (fun sourceFile -> "Seen" + Path.GetFileNameWithoutExtension(sourceFile.Path))
+                |> FSharpIncrementalValuesProvider.map (fun sourceFile ->
+                    "Seen" + Path.GetFileNameWithoutExtension(sourceFile.Path))
 
             context.RegisterSourceOutput(
                 sourceModuleNames,
                 Action<FSharpSourceProductionContext, string>(fun productionContext moduleName ->
-                    productionContext.AddImplementationSource(moduleName, text ("module " + moduleName), Prelude)))
+                    productionContext.AddImplementationSource(moduleName, text ("module " + moduleName), Prelude))
+            )
 
 [<FSharpGenerator>]
 type CancellationObservingGenerator() =
@@ -357,7 +374,10 @@ type CancellationObservingGenerator() =
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
                     if productionContext.CancellationToken.CanBeCanceled then
-                        productionContext.ReportDiagnostic(FSharpGeneratorDiagnostic.create "TEST0001" "Cancellation token was visible." Info)))
+                        productionContext.ReportDiagnostic(
+                            FSharpGeneratorDiagnostic.create "TEST0001" "Cancellation token was visible." Info
+                        ))
+            )
 
 [<FSharpGenerator>]
 type CancellationThrowingGenerator() =
@@ -366,7 +386,8 @@ type CancellationThrowingGenerator() =
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    raise (OperationCanceledException(productionContext.CancellationToken))))
+                    raise (OperationCanceledException(productionContext.CancellationToken)))
+            )
 
 [<FSharpGenerator>]
 type SameHintGeneratorA() =
@@ -375,7 +396,8 @@ type SameHintGeneratorA() =
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddImplementationSource("SharedHint", text "module A", Prelude)))
+                    productionContext.AddImplementationSource("SharedHint", text "module A", Prelude))
+            )
 
 [<FSharpGenerator>]
 type SameHintGeneratorB() =
@@ -384,7 +406,8 @@ type SameHintGeneratorB() =
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddImplementationSource("SharedHint", text "module B", Prelude)))
+                    productionContext.AddImplementationSource("SharedHint", text "module B", Prelude))
+            )
 
 [<FSharpGenerator>]
 type AnalyzerConfigGenerator() =
@@ -400,7 +423,8 @@ type AnalyzerConfigGenerator() =
             context.RegisterSourceOutput(
                 configuredName,
                 Action<FSharpSourceProductionContext, string>(fun productionContext moduleName ->
-                    productionContext.AddImplementationSource(moduleName, text ("module " + moduleName), Prelude)))
+                    productionContext.AddImplementationSource(moduleName, text ("module " + moduleName), Prelude))
+            )
 
 [<FSharpGenerator>]
 type InvalidSourceGenerator(hintName: string, source: string) =
@@ -409,7 +433,8 @@ type InvalidSourceGenerator(hintName: string, source: string) =
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddImplementationSource(hintName, text source, Prelude)))
+                    productionContext.AddImplementationSource(hintName, text source, Prelude))
+            )
 
 [<FSharpGenerator>]
 type ReportingDiagnosticGenerator(severity: FSharpDiagnosticSeverity) =
@@ -419,12 +444,16 @@ type ReportingDiagnosticGenerator(severity: FSharpDiagnosticSeverity) =
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
                     productionContext.ReportDiagnostic(
-                        {
-                            FSharpGeneratorDiagnostic.create "TESTDIAG" "Generator reported diagnostic." severity with
-                                FilePath = Some "schema.test"
-                        })
+                        { FSharpGeneratorDiagnostic.create "TESTDIAG" "Generator reported diagnostic." severity with
+                            FilePath = Some "schema.test" }
+                    )
 
-                    productionContext.AddImplementationSource("ReportedDiagnosticOutput", text "module ReportedDiagnosticOutput", Prelude)))
+                    productionContext.AddImplementationSource(
+                        "ReportedDiagnosticOutput",
+                        text "module ReportedDiagnosticOutput",
+                        Prelude
+                    ))
+            )
 
 [<FSharpGenerator>]
 type CountingGenerator(counter: ref<int>) =
@@ -434,7 +463,8 @@ type CountingGenerator(counter: ref<int>) =
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
                     counter.Value <- counter.Value + 1
-                    productionContext.AddImplementationSource("Counted", text "module Counted\nlet value = 1", Prelude)))
+                    productionContext.AddImplementationSource("Counted", text "module Counted\nlet value = 1", Prelude))
+            )
 
 [<FSharpGenerator>]
 type BuildHarnessGenerator() =
@@ -443,7 +473,12 @@ type BuildHarnessGenerator() =
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddImplementationSource("GeneratedPrelude", text "module GeneratedPrelude\nlet answer = 42", Prelude)))
+                    productionContext.AddImplementationSource(
+                        "GeneratedPrelude",
+                        text "module GeneratedPrelude\nlet answer = 42",
+                        Prelude
+                    ))
+            )
 
 [<FSharpGenerator>]
 type BuildHarnessSignaturePairGenerator() =
@@ -452,8 +487,19 @@ type BuildHarnessSignaturePairGenerator() =
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddSignatureSource("GeneratedContract", text "module GeneratedContract\nval answer: int", "GeneratedContract", Prelude)
-                    productionContext.AddImplementationSource("GeneratedContract", text "module GeneratedContract\nlet answer = 42", Prelude)))
+                    productionContext.AddSignatureSource(
+                        "GeneratedContract",
+                        text "module GeneratedContract\nval answer: int",
+                        "GeneratedContract",
+                        Prelude
+                    )
+
+                    productionContext.AddImplementationSource(
+                        "GeneratedContract",
+                        text "module GeneratedContract\nlet answer = 42",
+                        Prelude
+                    ))
+            )
 
 [<FSharpGenerator>]
 type PostInitializationAttributeGenerator() =
@@ -463,7 +509,10 @@ type PostInitializationAttributeGenerator() =
                 Action<FSharpPostInitializationContext>(fun postInitializationContext ->
                     postInitializationContext.AddImplementationSource(
                         "GeneratedMarkerAttribute",
-                        text "namespace GeneratedSupport\n\nopen System\n\n[<AttributeUsage(AttributeTargets.All)>]\ntype GeneratedMarkerAttribute() =\n    inherit Attribute()")))
+                        text
+                            "namespace GeneratedSupport\n\nopen System\n\n[<AttributeUsage(AttributeTargets.All)>]\ntype GeneratedMarkerAttribute() =\n    inherit Attribute()"
+                    ))
+            )
 
 [<FSharpGenerator>]
 type PostInitializationVisibleToSourceOutputGenerator() =
@@ -471,22 +520,28 @@ type PostInitializationVisibleToSourceOutputGenerator() =
         member _.Initialize context =
             context.RegisterPostInitializationOutput(
                 Action<FSharpPostInitializationContext>(fun postInitializationContext ->
-                    postInitializationContext.AddImplementationSource("PostInitSupport", text "module PostInitSupport\nlet value = 1")))
+                    postInitializationContext.AddImplementationSource(
+                        "PostInitSupport",
+                        text "module PostInitSupport\nlet value = 1"
+                    ))
+            )
 
             let postInitSourceNames =
                 context.SourceFilesProvider
                 |> FSharpIncrementalValuesProvider.choose (fun sourceFile ->
                     let hintName = Path.GetFileNameWithoutExtension(sourceFile.Path)
 
-                    if hintName = "PostInitSupport" then
-                        Some hintName
-                    else
-                        None)
+                    if hintName = "PostInitSupport" then Some hintName else None)
 
             context.RegisterSourceOutput(
                 postInitSourceNames,
                 Action<FSharpSourceProductionContext, string>(fun productionContext hintName ->
-                    productionContext.AddImplementationSource("Saw" + hintName, text ("module Saw" + hintName), Prelude)))
+                    productionContext.AddImplementationSource(
+                        "Saw" + hintName,
+                        text ("module Saw" + hintName),
+                        Prelude
+                    ))
+            )
 
 [<FSharpGenerator>]
 type InvalidPostInitializationGenerator() =
@@ -494,20 +549,32 @@ type InvalidPostInitializationGenerator() =
         member _.Initialize context =
             context.RegisterPostInitializationOutput(
                 Action<FSharpPostInitializationContext>(fun postInitializationContext ->
-                    postInitializationContext.AddImplementationSource("InvalidPostInit", text "")))
+                    postInitializationContext.AddImplementationSource("InvalidPostInit", text ""))
+            )
 
             context.RegisterSourceOutput(
                 context.ProjectOptionsProvider,
                 Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddImplementationSource("ShouldNotRunAfterInvalidPostInit", text "module ShouldNotRunAfterInvalidPostInit", Prelude)))
+                    productionContext.AddImplementationSource(
+                        "ShouldNotRunAfterInvalidPostInit",
+                        text "module ShouldNotRunAfterInvalidPostInit",
+                        Prelude
+                    ))
+            )
 
 [<Fact>]
 let ``prelude source is inserted before original files and stored`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let program = fileIn root "Program.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Application [ domain; program ] |> runWith options (ImplementationGenerator("PreludeTypes", Prelude))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Application [ domain; program ]
+        |> runWith options (ImplementationGenerator("PreludeTypes", Prelude))
 
     Assert.Empty(result.Diagnostics)
     Assert.Equal(result.GeneratedSources.[0].ResolvedPath, result.UpdatedSourceFiles.[0])
@@ -519,17 +586,22 @@ let ``prelude source is inserted before original files and stored`` () =
 let ``updated source files resolve generated text from in-memory store`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     writeFile domain "module Domain\nlet value = 1"
 
     let project = snapshot Library [ domain ]
-    let result = project |> runWith options (ImplementationGenerator("GeneratedPrelude", Prelude))
+
+    let result =
+        project
+        |> runWith options (ImplementationGenerator("GeneratedPrelude", Prelude))
 
     let updatedProjectOptions =
-        {
-            project.ProjectOptions with
-                SourceFiles = result.UpdatedSourceFiles
-        }
+        { project.ProjectOptions with
+            SourceFiles = result.UpdatedSourceFiles }
 
     let loadResult =
         FSharpSourceFileSnapshot.loadProjectSourceFiles
@@ -553,10 +625,7 @@ let ``source snapshot loading reports unresolved paths`` () =
     let project = snapshot Library [ missing ]
 
     let loadResult =
-        FSharpSourceFileSnapshot.loadProjectSourceFiles
-            project.ProjectOptions
-            (fun _ -> None)
-            CancellationToken.None
+        FSharpSourceFileSnapshot.loadProjectSourceFiles project.ProjectOptions (fun _ -> None) CancellationToken.None
 
     let diagnostic = Assert.Single(loadResult.Diagnostics)
     Assert.Equal("FSG0011", diagnostic.Id)
@@ -568,40 +637,66 @@ let ``after file placement inserts generated source before later consumers`` () 
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let program = fileIn root "Program.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Application [ domain; program ] |> runWith options (ImplementationGenerator("DomainExtensions", AfterFile domain))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Application [ domain; program ]
+        |> runWith options (ImplementationGenerator("DomainExtensions", AfterFile domain))
 
     Assert.Empty(result.Diagnostics)
-    Assert.Equal<IReadOnlyList<string>>(immutableArray [ domain; result.GeneratedSources.[0].ResolvedPath; program ], result.UpdatedSourceFiles)
+
+    Assert.Equal<IReadOnlyList<string>>(
+        immutableArray [ domain; result.GeneratedSources.[0].ResolvedPath; program ],
+        result.UpdatedSourceFiles
+    )
 
 [<Fact>]
 let ``multiple after file placements preserve generator order`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let program = fileIn root "Program.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let driver =
         FSharpGeneratorDriver.Create(
-            [
-                ImplementationGenerator("FirstAfter", AfterFile domain)
-                ImplementationGenerator("SecondAfter", AfterFile domain)
-            ],
-            options)
+            [ ImplementationGenerator("FirstAfter", AfterFile domain)
+              ImplementationGenerator("SecondAfter", AfterFile domain) ],
+            options
+        )
 
-    let _, result = driver.RunGenerators(snapshot Application [ domain; program ], CancellationToken.None)
+    let _, result =
+        driver.RunGenerators(snapshot Application [ domain; program ], CancellationToken.None)
 
     Assert.Empty(result.Diagnostics)
+
     Assert.Equal<IReadOnlyList<string>>(
-        immutableArray [ domain; result.GeneratedSources.[0].ResolvedPath; result.GeneratedSources.[1].ResolvedPath; program ],
-        result.UpdatedSourceFiles)
+        immutableArray
+            [ domain
+              result.GeneratedSources.[0].ResolvedPath
+              result.GeneratedSources.[1].ResolvedPath
+              program ],
+        result.UpdatedSourceFiles
+    )
 
 [<Fact>]
 let ``before last source preserves application final file`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let program = fileIn root "Program.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Application [ domain; program ] |> runWith options (ImplementationGenerator("Helpers", BeforeLastSourceFile))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Application [ domain; program ]
+        |> runWith options (ImplementationGenerator("Helpers", BeforeLastSourceFile))
 
     Assert.Empty(result.Diagnostics)
     Assert.Equal(program, result.UpdatedSourceFiles.[2])
@@ -611,29 +706,45 @@ let ``multiple before last placements preserve generator order`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let program = fileIn root "Program.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let driver =
         FSharpGeneratorDriver.Create(
-            [
-                ImplementationGenerator("FirstHelper", BeforeLastSourceFile)
-                ImplementationGenerator("SecondHelper", BeforeLastSourceFile)
-            ],
-            options)
+            [ ImplementationGenerator("FirstHelper", BeforeLastSourceFile)
+              ImplementationGenerator("SecondHelper", BeforeLastSourceFile) ],
+            options
+        )
 
-    let _, result = driver.RunGenerators(snapshot Application [ domain; program ], CancellationToken.None)
+    let _, result =
+        driver.RunGenerators(snapshot Application [ domain; program ], CancellationToken.None)
 
     Assert.Empty(result.Diagnostics)
+
     Assert.Equal<IReadOnlyList<string>>(
-        immutableArray [ domain; result.GeneratedSources.[0].ResolvedPath; result.GeneratedSources.[1].ResolvedPath; program ],
-        result.UpdatedSourceFiles)
+        immutableArray
+            [ domain
+              result.GeneratedSources.[0].ResolvedPath
+              result.GeneratedSources.[1].ResolvedPath
+              program ],
+        result.UpdatedSourceFiles
+    )
 
 [<Fact>]
 let ``end of project is rejected for applications`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let program = fileIn root "Program.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Application [ domain; program ] |> runWith options (ImplementationGenerator("Late", EndOfProject))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Application [ domain; program ]
+        |> runWith options (ImplementationGenerator("Late", EndOfProject))
 
     Assert.True(hasDiagnostic "FSG0012" result)
     Assert.Empty(result.GeneratedSources)
@@ -643,8 +754,14 @@ let ``end of project is rejected for applications`` () =
 let ``end of project is allowed for libraries`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (ImplementationGenerator("Late", EndOfProject))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (ImplementationGenerator("Late", EndOfProject))
 
     Assert.Empty(result.Diagnostics)
     Assert.Equal(domain, result.UpdatedSourceFiles.[0])
@@ -654,8 +771,13 @@ let ``end of project is allowed for libraries`` () =
 let ``duplicate hint names fail generation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (DuplicateHintGenerator())
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ] |> runWith options (DuplicateHintGenerator())
 
     Assert.True(hasDiagnostic "FSG0006" result)
 
@@ -663,21 +785,43 @@ let ``duplicate hint names fail generation`` () =
 let ``duplicate resolved generated paths fail generation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (DuplicateResolvedPathGenerator())
 
-    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0006" && diagnostic.Message.Contains("Client.fs", StringComparison.OrdinalIgnoreCase)))
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (DuplicateResolvedPathGenerator())
+
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic ->
+            diagnostic.Id = "FSG0006"
+            && diagnostic.Message.Contains("Client.fs", StringComparison.OrdinalIgnoreCase))
+    )
+
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
 let ``generated path colliding with original source fails generation`` () =
     let root = tempRoot ()
     let generatedRoot = fileIn root "generated"
-    let collidingSource = generatedPath generatedRoot typeof<ImplementationGenerator> Implementation "Collides"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = generatedRoot }
-    let result = snapshot Library [ collidingSource ] |> runWith options (ImplementationGenerator("Collides", Prelude))
 
-    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+    let collidingSource =
+        generatedPath generatedRoot typeof<ImplementationGenerator> Implementation "Collides"
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = generatedRoot }
+
+    let result =
+        snapshot Library [ collidingSource ]
+        |> runWith options (ImplementationGenerator("Collides", Prelude))
+
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+
     Assert.Contains("Collides", diagnostic.Message)
     Assert.Contains(collidingSource, diagnostic.Message)
     Assert.Empty(result.GeneratedSources)
@@ -688,8 +832,14 @@ let ``generated hint sanitization is deterministic across path separators`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let generatedRoot = fileIn root "generated"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = generatedRoot }
-    let result = snapshot Library [ domain ] |> runWith options (ImplementationGenerator("..\\Nested/Client:Type", Prelude))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = generatedRoot }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (ImplementationGenerator("..\\Nested/Client:Type", Prelude))
 
     Assert.Empty(result.Diagnostics)
     let generatedSource = Assert.Single(result.GeneratedSources)
@@ -707,10 +857,18 @@ let ``missing anchor fails generation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let missing = fileIn root "Missing.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (ImplementationGenerator("BeforeMissing", BeforeFile missing))
 
-    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0007"))
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (ImplementationGenerator("BeforeMissing", BeforeFile missing))
+
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0007"))
+
     Assert.Contains("BeforeMissing", diagnostic.Message)
     Assert.Contains(missing, diagnostic.Message)
     Assert.Empty(result.GeneratedSources)
@@ -720,18 +878,35 @@ let ``generated anchor cycle fails generation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let generatedRoot = fileIn root "generated"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = generatedRoot }
-    let result = snapshot Library [ domain ] |> runWith options (CyclicAnchorGenerator(generatedRoot))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = generatedRoot }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (CyclicAnchorGenerator(generatedRoot))
 
     Assert.True(hasDiagnostic "FSG0009" result)
-    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0009" && diagnostic.Message.Contains("Generated source 'A'", StringComparison.Ordinal)))
+
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic ->
+            diagnostic.Id = "FSG0009"
+            && diagnostic.Message.Contains("Generated source 'A'", StringComparison.Ordinal))
+    )
+
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
 let ``missing marker attribute fails generator initialization`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let result = snapshot Library [ domain ] |> runWith options (UnmarkedGenerator())
 
     Assert.True(hasDiagnostic "FSG0002" result)
@@ -740,16 +915,29 @@ let ``missing marker attribute fails generator initialization`` () =
 let ``generator assembly matching compiler output is rejected`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let generatorAssemblyPath = Path.GetFullPath typeof<ImplementationGenerator>.Assembly.Location
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let project = snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "--out:" + generatorAssemblyPath ]
 
-    let result = project |> runWith options (ImplementationGenerator("Generated", Prelude))
+    let generatorAssemblyPath =
+        Path.GetFullPath typeof<ImplementationGenerator>.Assembly.Location
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project =
+        snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "--out:" + generatorAssemblyPath ]
+
+    let result =
+        project |> runWith options (ImplementationGenerator("Generated", Prelude))
 
     let diagnostic =
-        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains("defines it", StringComparison.OrdinalIgnoreCase)))
+        Assert.Single(
+            result.Diagnostics
+            |> Seq.filter (fun diagnostic ->
+                diagnostic.Id = "FSG0002"
+                && diagnostic.Message.Contains("defines it", StringComparison.OrdinalIgnoreCase))
+        )
 
-    Assert.Contains(nameof(ImplementationGenerator), diagnostic.Message)
+    Assert.Contains(nameof (ImplementationGenerator), diagnostic.Message)
     Assert.Contains(generatorAssemblyPath, diagnostic.Message)
     Assert.Empty(result.GeneratedSources)
     Assert.Equal<string array>([| domain |], result.UpdatedSourceFiles |> Seq.toArray)
@@ -758,21 +946,41 @@ let ``generator assembly matching compiler output is rejected`` () =
 let ``split compiler output option is used for generator assembly validation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let generatorAssemblyPath = Path.GetFullPath typeof<ImplementationGenerator>.Assembly.Location
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let project = snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "--out"; generatorAssemblyPath ]
 
-    let result = project |> runWith options (ImplementationGenerator("Generated", Prelude))
+    let generatorAssemblyPath =
+        Path.GetFullPath typeof<ImplementationGenerator>.Assembly.Location
 
-    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains(generatorAssemblyPath, StringComparison.OrdinalIgnoreCase)))
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project =
+        snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "--out"; generatorAssemblyPath ]
+
+    let result =
+        project |> runWith options (ImplementationGenerator("Generated", Prelude))
+
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic ->
+            diagnostic.Id = "FSG0002"
+            && diagnostic.Message.Contains(generatorAssemblyPath, StringComparison.OrdinalIgnoreCase))
+    )
+
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
 let ``initialization exception is reported`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (ThrowingInitializationGenerator())
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (ThrowingInitializationGenerator())
 
     Assert.True(hasDiagnostic "FSG0003" result)
 
@@ -780,8 +988,13 @@ let ``initialization exception is reported`` () =
 let ``execution exception is reported`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (ThrowingExecutionGenerator())
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ] |> runWith options (ThrowingExecutionGenerator())
 
     Assert.True(hasDiagnostic "FSG0004" result)
 
@@ -789,10 +1002,18 @@ let ``execution exception is reported`` () =
 let ``reported warning diagnostic does not suppress generated source`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (ReportingDiagnosticGenerator(Warning))
 
-    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "TESTDIAG"))
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (ReportingDiagnosticGenerator(Warning))
+
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "TESTDIAG"))
+
     Assert.Equal(Warning, diagnostic.Severity)
     Assert.Equal(Some "schema.test", diagnostic.FilePath)
     Assert.Single(result.GeneratedSources) |> ignore
@@ -801,10 +1022,18 @@ let ``reported warning diagnostic does not suppress generated source`` () =
 let ``reported error diagnostic suppresses generated source`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (ReportingDiagnosticGenerator(Error))
 
-    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "TESTDIAG"))
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (ReportingDiagnosticGenerator(Error))
+
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "TESTDIAG"))
+
     Assert.Equal(Error, diagnostic.Severity)
     Assert.Equal(Some "schema.test", diagnostic.FilePath)
     Assert.Empty(result.GeneratedSources)
@@ -814,8 +1043,13 @@ let ``reported error diagnostic suppresses generated source`` () =
 let ``generated signature companion is placed before implementation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (SignaturePairGenerator(Prelude))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ] |> runWith options (SignaturePairGenerator(Prelude))
 
     Assert.Empty(result.Diagnostics)
     Assert.Equal(Signature, result.GeneratedSources.[0].Kind)
@@ -827,10 +1061,18 @@ let ``generated signature companion is placed before implementation`` () =
 let ``multiple generated signatures for one implementation fail`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (MultipleSignatureCompanionsGenerator())
 
-    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0008"))
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (MultipleSignatureCompanionsGenerator())
+
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0008"))
+
     Assert.Contains("multiple generated signatures", diagnostic.Message)
     Assert.Contains("ClientSigA", diagnostic.Message)
     Assert.Contains("ClientSigB", diagnostic.Message)
@@ -840,8 +1082,14 @@ let ``multiple generated signatures for one implementation fail`` () =
 let ``generated signature with missing companion fails`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (MissingSignatureCompanionGenerator())
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (MissingSignatureCompanionGenerator())
 
     Assert.True(hasDiagnostic "FSG0008" result)
 
@@ -849,8 +1097,14 @@ let ``generated signature with missing companion fails`` () =
 let ``generated signature for user implementation fails with explicit diagnostic`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (UserImplementationSignatureGenerator())
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (UserImplementationSignatureGenerator())
 
     Assert.True(hasDiagnostic "FSG0014" result)
     Assert.False(hasDiagnostic "FSG0008" result)
@@ -860,8 +1114,14 @@ let ``generated signature for user implementation fails with explicit diagnostic
 let ``implementation hint with fsi extension is rejected`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (ImplementationGenerator("Wrong.fsi", Prelude))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (ImplementationGenerator("Wrong.fsi", Prelude))
 
     Assert.True(hasDiagnostic "FSG0013" result)
 
@@ -869,10 +1129,21 @@ let ``implementation hint with fsi extension is rejected`` () =
 let ``empty generated source reports generated file path`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (InvalidSourceGenerator("Empty", ""))
 
-    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0005" && diagnostic.FilePath.IsSome))
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (InvalidSourceGenerator("Empty", ""))
+
+    let diagnostic =
+        Assert.Single(
+            result.Diagnostics
+            |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0005" && diagnostic.FilePath.IsSome)
+        )
+
     Assert.Contains("Empty.fs", diagnostic.FilePath.Value)
     Assert.Empty(result.GeneratedSources)
 
@@ -880,10 +1151,18 @@ let ``empty generated source reports generated file path`` () =
 let ``invalid post initialization output reports once and skips source outputs`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (InvalidPostInitializationGenerator())
 
-    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0005"))
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (InvalidPostInitializationGenerator())
+
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0005"))
+
     Assert.Contains("InvalidPostInit.fs", diagnostic.FilePath.Value)
     Assert.DoesNotContain(result.GeneratedSources, fun source -> source.HintName = "ShouldNotRunAfterInvalidPostInit")
     Assert.Empty(result.GeneratedSources)
@@ -892,8 +1171,14 @@ let ``invalid post initialization output reports once and skips source outputs``
 let ``generated source without module or namespace is rejected`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (InvalidSourceGenerator("NoContainer", "let value = 1"))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (InvalidSourceGenerator("NoContainer", "let value = 1"))
 
     Assert.True(hasDiagnostic "FSG0005" result)
     Assert.Empty(result.GeneratedSources)
@@ -902,31 +1187,54 @@ let ``generated source without module or namespace is rejected`` () =
 let ``generated source syntax errors are reported with generated file path`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (InvalidSourceGenerator("BrokenSyntax", "module BrokenSyntax\nlet value ="))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (InvalidSourceGenerator("BrokenSyntax", "module BrokenSyntax\nlet value ="))
 
     let parseDiagnostics =
         result.Diagnostics
-        |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0005" && diagnostic.Message.Contains("parse failed", StringComparison.OrdinalIgnoreCase))
+        |> Seq.filter (fun diagnostic ->
+            diagnostic.Id = "FSG0005"
+            && diagnostic.Message.Contains("parse failed", StringComparison.OrdinalIgnoreCase))
         |> Seq.toArray
-    let generatedFilePath = generatedPath options.GeneratedRoot typeof<InvalidSourceGenerator> Implementation "BrokenSyntax"
+
+    let generatedFilePath =
+        generatedPath options.GeneratedRoot typeof<InvalidSourceGenerator> Implementation "BrokenSyntax"
 
     Assert.NotEmpty(parseDiagnostics)
-    Assert.All(parseDiagnostics, fun diagnostic ->
-        Assert.Equal(Some generatedFilePath, diagnostic.FilePath)
-        Assert.True(diagnostic.Range.IsSome))
+
+    Assert.All(
+        parseDiagnostics,
+        fun diagnostic ->
+            Assert.Equal(Some generatedFilePath, diagnostic.FilePath)
+            Assert.True(diagnostic.Range.IsSome)
+    )
+
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
 let ``generated source parser observes project conditional defines`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let project = snapshotWithOtherOptions Library [ domain ] [ "--define:GENERATED_OK" ]
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project =
+        snapshotWithOtherOptions Library [ domain ] [ "--define:GENERATED_OK" ]
+
     let source =
         "module ConditionalGenerated\n#if GENERATED_OK\nlet value = 1\n#else\nlet value =\n#endif"
 
-    let result = project |> runWith options (InvalidSourceGenerator("ConditionalGenerated", source))
+    let result =
+        project
+        |> runWith options (InvalidSourceGenerator("ConditionalGenerated", source))
 
     Assert.Empty(result.Diagnostics)
     Assert.Single(result.GeneratedSources) |> ignore
@@ -935,16 +1243,21 @@ let ``generated source parser observes project conditional defines`` () =
 let ``source snapshot count mismatch fails generation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let project =
-        {
-            snapshot Library [ domain ] with
-                SourceFiles = ImmutableArray<FSharpSourceFileSnapshot>.Empty
-        }
+        { snapshot Library [ domain ] with
+            SourceFiles = ImmutableArray<FSharpSourceFileSnapshot>.Empty }
 
-    let result = project |> runWith options (ImplementationGenerator("Generated", Prelude))
+    let result =
+        project |> runWith options (ImplementationGenerator("Generated", Prelude))
 
-    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+
     Assert.Contains("source file count", diagnostic.Message)
     Assert.Empty(result.GeneratedSources)
 
@@ -953,16 +1266,21 @@ let ``source snapshot path mismatch fails generation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let other = fileIn root "Other.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let project =
-        {
-            snapshot Library [ domain ] with
-                SourceFiles = immutableArray [ FSharpSourceFileSnapshot.create other "module Other" ]
-        }
+        { snapshot Library [ domain ] with
+            SourceFiles = immutableArray [ FSharpSourceFileSnapshot.create other "module Other" ] }
 
-    let result = project |> runWith options (ImplementationGenerator("Generated", Prelude))
+    let result =
+        project |> runWith options (ImplementationGenerator("Generated", Prelude))
 
-    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+
     Assert.Contains(domain, diagnostic.Message)
     Assert.Contains(other, diagnostic.Message)
     Assert.Empty(result.GeneratedSources)
@@ -971,10 +1289,18 @@ let ``source snapshot path mismatch fails generation`` () =
 let ``project cache identity changes when generated source changes`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let project = snapshot Library [ domain ]
-    let resultA = project |> runWith options (ImplementationGenerator("Generated", Prelude))
-    let resultB = project |> runWith options (ImplementationGenerator("Generated2", Prelude))
+
+    let resultA =
+        project |> runWith options (ImplementationGenerator("Generated", Prelude))
+
+    let resultB =
+        project |> runWith options (ImplementationGenerator("Generated2", Prelude))
 
     let identityA = FSharpProjectCacheIdentity.compute project resultA.GeneratedSources
     let identityB = FSharpProjectCacheIdentity.compute project resultB.GeneratedSources
@@ -985,11 +1311,18 @@ let ``project cache identity changes when generated source changes`` () =
 let ``RunGeneratorsAndUpdateProjectOptions updates source files and stamp`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let project = snapshot Library [ domain ]
-    let driver = FSharpGeneratorDriver.Create([ ImplementationGenerator("Generated", Prelude) ], options)
 
-    let _, updatedOptions, result = driver.RunGeneratorsAndUpdateProjectOptions(project, CancellationToken.None)
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project = snapshot Library [ domain ]
+
+    let driver =
+        FSharpGeneratorDriver.Create([ ImplementationGenerator("Generated", Prelude) ], options)
+
+    let _, updatedOptions, result =
+        driver.RunGeneratorsAndUpdateProjectOptions(project, CancellationToken.None)
 
     Assert.Empty(result.Diagnostics)
     Assert.Equal<string array>(result.UpdatedSourceFiles |> Seq.toArray, updatedOptions.SourceFiles |> Seq.toArray)
@@ -999,11 +1332,22 @@ let ``RunGeneratorsAndUpdateProjectOptions updates source files and stamp`` () =
 let ``project stamp changes when generator set changes even if no sources are generated`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let project = snapshot Library [ domain ]
 
-    let _, optionsA, _ = FSharpGeneratorDriver.Create([ NoOutputGeneratorA() ], options).RunGeneratorsAndUpdateProjectOptions(project, CancellationToken.None)
-    let _, optionsB, _ = FSharpGeneratorDriver.Create([ NoOutputGeneratorB() ], options).RunGeneratorsAndUpdateProjectOptions(project, CancellationToken.None)
+    let _, optionsA, _ =
+        FSharpGeneratorDriver
+            .Create([ NoOutputGeneratorA() ], options)
+            .RunGeneratorsAndUpdateProjectOptions(project, CancellationToken.None)
+
+    let _, optionsB, _ =
+        FSharpGeneratorDriver
+            .Create([ NoOutputGeneratorB() ], options)
+            .RunGeneratorsAndUpdateProjectOptions(project, CancellationToken.None)
 
     Assert.NotEqual(optionsA.Stamp, optionsB.Stamp)
 
@@ -1012,7 +1356,11 @@ let ``driver reuses cached result when inputs are unchanged`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let counter = ref 0
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let project = snapshot Library [ domain ]
     let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
 
@@ -1029,12 +1377,22 @@ let ``source content change invalidates cached result`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let counter = ref 0
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let firstProject = snapshotWithSourceContents Library [ domain, "module Domain\nlet value = 1" ]
-    let secondProject = snapshotWithSourceContents Library [ domain, "module Domain\nlet value = 2" ]
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let firstProject =
+        snapshotWithSourceContents Library [ domain, "module Domain\nlet value = 1" ]
+
+    let secondProject =
+        snapshotWithSourceContents Library [ domain, "module Domain\nlet value = 2" ]
+
     let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
 
-    let updatedDriver, first = driver.RunGenerators(firstProject, CancellationToken.None)
+    let updatedDriver, first =
+        driver.RunGenerators(firstProject, CancellationToken.None)
+
     let _, second = updatedDriver.RunGenerators(secondProject, CancellationToken.None)
 
     Assert.False(first.CacheHit)
@@ -1047,12 +1405,18 @@ let ``source file order change invalidates cached result`` () =
     let firstSource = fileIn root "First.fs"
     let secondSource = fileIn root "Second.fs"
     let counter = ref 0
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let firstProject = snapshot Library [ firstSource; secondSource ]
     let secondProject = snapshot Library [ secondSource; firstSource ]
     let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
 
-    let updatedDriver, first = driver.RunGenerators(firstProject, CancellationToken.None)
+    let updatedDriver, first =
+        driver.RunGenerators(firstProject, CancellationToken.None)
+
     let _, second = updatedDriver.RunGenerators(secondProject, CancellationToken.None)
 
     Assert.False(first.CacheHit)
@@ -1065,12 +1429,22 @@ let ``additional file checksum change invalidates cached result`` () =
     let domain = fileIn root "Domain.fs"
     let schema = fileIn root "schema.json"
     let counter = ref 0
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let firstProject = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"A"}""" ]
-    let secondProject = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"B"}""" ]
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let firstProject =
+        snapshotWithAdditional Library [ domain ] [ schema, """{"name":"A"}""" ]
+
+    let secondProject =
+        snapshotWithAdditional Library [ domain ] [ schema, """{"name":"B"}""" ]
+
     let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
 
-    let updatedDriver, first = driver.RunGenerators(firstProject, CancellationToken.None)
+    let updatedDriver, first =
+        driver.RunGenerators(firstProject, CancellationToken.None)
+
     let _, second = updatedDriver.RunGenerators(secondProject, CancellationToken.None)
 
     Assert.False(first.CacheHit)
@@ -1084,20 +1458,19 @@ let ``additional text content invalidates cache when checksum is unavailable`` (
     let schema = fileIn root "schema.json"
     let content = ref """{"name":"A"}"""
     let counter = ref 0
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let project =
-        {
-            snapshot Library [ domain ] with
-                AdditionalTexts =
-                    immutableArray
-                        [
-                            {
-                                Path = schema
-                                GetText = fun _ -> Some(text content.Value)
-                                Checksum = None
-                            }
-                        ]
-        }
+        { snapshot Library [ domain ] with
+            AdditionalTexts =
+                immutableArray
+                    [ { Path = schema
+                        GetText = fun _ -> Some(text content.Value)
+                        Checksum = None } ] }
+
     let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
 
     let updatedDriver, first = driver.RunGenerators(project, CancellationToken.None)
@@ -1113,12 +1486,22 @@ let ``analyzer config option change invalidates cached result`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let counter = ref 0
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let firstProject = snapshotWithAnalyzerOptions Library [ domain ] [ KeyValuePair("build_property.Mode", "A") ]
-    let secondProject = snapshotWithAnalyzerOptions Library [ domain ] [ KeyValuePair("build_property.Mode", "B") ]
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let firstProject =
+        snapshotWithAnalyzerOptions Library [ domain ] [ KeyValuePair("build_property.Mode", "A") ]
+
+    let secondProject =
+        snapshotWithAnalyzerOptions Library [ domain ] [ KeyValuePair("build_property.Mode", "B") ]
+
     let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
 
-    let updatedDriver, first = driver.RunGenerators(firstProject, CancellationToken.None)
+    let updatedDriver, first =
+        driver.RunGenerators(firstProject, CancellationToken.None)
+
     let _, second = updatedDriver.RunGenerators(secondProject, CancellationToken.None)
 
     Assert.False(first.CacheHit)
@@ -1132,24 +1515,27 @@ let ``additional text analyzer config option change invalidates cached result`` 
     let schema = fileIn root "schema.json"
     let mode = ref "A"
     let counter = ref 0
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let baseProject = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"Customer"}""" ]
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let baseProject =
+        snapshotWithAdditional Library [ domain ] [ schema, """{"name":"Customer"}""" ]
+
     let project =
-        {
-            baseProject with
-                AnalyzerConfigOptions =
-                    {
-                        GlobalOptions = Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
-                        GetOptionsForPath =
-                            fun path ->
-                                let values = Dictionary<string, string>()
+        { baseProject with
+            AnalyzerConfigOptions =
+                { GlobalOptions = Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
+                  GetOptionsForPath =
+                    fun path ->
+                        let values = Dictionary<string, string>()
 
-                                if String.Equals(Path.GetFullPath path, schema, StringComparison.OrdinalIgnoreCase) then
-                                    values["build_metadata.Mode"] <- mode.Value
+                        if String.Equals(Path.GetFullPath path, schema, StringComparison.OrdinalIgnoreCase) then
+                            values["build_metadata.Mode"] <- mode.Value
 
-                                values :> IReadOnlyDictionary<string, string>
-                    }
-        }
+                        values :> IReadOnlyDictionary<string, string> } }
+
     let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
 
     let updatedDriver, first = driver.RunGenerators(project, CancellationToken.None)
@@ -1164,29 +1550,45 @@ let ``additional text analyzer config option change invalidates cached result`` 
 let ``generator assembly content change invalidates cached result`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
+
     let generatorAssembly =
-        Path.Combine(repoRoot (), "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        Path.Combine(
+            repoRoot (),
+            "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll"
+        )
         |> Path.GetFullPath
+
     let copiedGeneratorAssembly = fileIn root "FSharpNativeGenerator.TestGenerators.dll"
 
     Directory.CreateDirectory(root) |> ignore
     File.Copy(generatorAssembly, copiedGeneratorAssembly)
 
     let loadResult = FSharpGeneratorAssemblyLoader.loadFromPath copiedGeneratorAssembly
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let project = snapshot Library [ domain ]
     let driver = FSharpGeneratorDriver.Create(loadResult.Generators, options)
 
     let updatedDriver, first = driver.RunGenerators(project, CancellationToken.None)
 
     do
-        use stream = File.Open(copiedGeneratorAssembly, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)
+        use stream =
+            File.Open(copiedGeneratorAssembly, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)
+
         stream.WriteByte 0uy
 
     let _, second = updatedDriver.RunGenerators(project, CancellationToken.None)
 
     Assert.Empty(loadResult.Diagnostics)
-    Assert.Contains(loadResult.Generators, fun generator -> generator.GetType().FullName = "FSharpNativeGenerator.TestGenerators.CliHarnessGenerator")
+
+    Assert.Contains(
+        loadResult.Generators,
+        fun generator -> generator.GetType().FullName = "FSharpNativeGenerator.TestGenerators.CliHarnessGenerator"
+    )
+
     Assert.False(first.CacheHit)
     Assert.False(second.CacheHit)
 
@@ -1196,8 +1598,14 @@ let ``additional text provider can filter and generate source`` () =
     let domain = fileIn root "Domain.fs"
     let schema = fileIn root "Customer.schema"
     let ignored = fileIn root "notes.txt"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let project = snapshotWithAdditional Library [ domain ] [ schema, "module Generated.Customer"; ignored, "ignore me" ]
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project =
+        snapshotWithAdditional Library [ domain ] [ schema, "module Generated.Customer"; ignored, "ignore me" ]
+
     let result = project |> runWith options (AdditionalTextGenerator())
 
     Assert.Empty(result.Diagnostics)
@@ -1209,15 +1617,19 @@ let ``additional text provider can filter and generate source`` () =
 let ``source files provider does not see generated outputs from same run`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let project = snapshot Library [ domain ]
+
     let driver =
         FSharpGeneratorDriver.Create(
-            [
-                ImplementationGenerator("GeneratedInput", Prelude)
-                SourceFilesEchoGenerator()
-            ],
-            options)
+            [ ImplementationGenerator("GeneratedInput", Prelude)
+              SourceFilesEchoGenerator() ],
+            options
+        )
 
     let _, result = driver.RunGenerators(project, CancellationToken.None)
     let hints = result.GeneratedSources |> Seq.map _.HintName |> Seq.toArray
@@ -1231,7 +1643,11 @@ let ``source files provider does not see generated outputs from same run`` () =
 let ``analyzer config provider can drive generated output`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     let project =
         snapshotWithAnalyzerOptions
             Library
@@ -1249,9 +1665,16 @@ let ``analyzer config provider can drive generated output`` () =
 let ``cancellation token is propagated to source production context`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     use cts = new CancellationTokenSource()
-    let driver = FSharpGeneratorDriver.Create([ CancellationObservingGenerator() ], options)
+
+    let driver =
+        FSharpGeneratorDriver.Create([ CancellationObservingGenerator() ], options)
+
     let _, result = driver.RunGenerators(snapshot Library [ domain ], cts.Token)
 
     Assert.True(hasDiagnostic "TEST0001" result)
@@ -1260,29 +1683,50 @@ let ``cancellation token is propagated to source production context`` () =
 let ``cancelled token before generator run is observed`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
     use cts = new CancellationTokenSource()
     cts.Cancel()
-    let driver = FSharpGeneratorDriver.Create([ ImplementationGenerator("Generated", Prelude) ], options)
 
-    Assert.Throws<OperationCanceledException>(fun () -> driver.RunGenerators(snapshot Library [ domain ], cts.Token) |> ignore)
+    let driver =
+        FSharpGeneratorDriver.Create([ ImplementationGenerator("Generated", Prelude) ], options)
+
+    Assert.Throws<OperationCanceledException>(fun () ->
+        driver.RunGenerators(snapshot Library [ domain ], cts.Token) |> ignore)
 
 [<Fact>]
 let ``generator observed cancellation is not converted to diagnostic`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let driver = FSharpGeneratorDriver.Create([ CancellationThrowingGenerator() ], options)
 
-    Assert.Throws<OperationCanceledException>(fun () -> driver.RunGenerators(snapshot Library [ domain ], CancellationToken.None) |> ignore)
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let driver =
+        FSharpGeneratorDriver.Create([ CancellationThrowingGenerator() ], options)
+
+    Assert.Throws<OperationCanceledException>(fun () ->
+        driver.RunGenerators(snapshot Library [ domain ], CancellationToken.None)
+        |> ignore)
 
 [<Fact>]
 let ``same hint names across different generators remain path unique`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let driver = FSharpGeneratorDriver.Create([ SameHintGeneratorA(); SameHintGeneratorB() ], options)
-    let _, result = driver.RunGenerators(snapshot Library [ domain ], CancellationToken.None)
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let driver =
+        FSharpGeneratorDriver.Create([ SameHintGeneratorA(); SameHintGeneratorB() ], options)
+
+    let _, result =
+        driver.RunGenerators(snapshot Library [ domain ], CancellationToken.None)
 
     Assert.Empty(result.Diagnostics)
     Assert.Equal(2, result.GeneratedSources.Length)
@@ -1306,8 +1750,12 @@ let ``additional text change updates project cache identity`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let schema = fileIn root "schema.json"
-    let snapshotA = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"A"}""" ]
-    let snapshotB = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"B"}""" ]
+
+    let snapshotA =
+        snapshotWithAdditional Library [ domain ] [ schema, """{"name":"A"}""" ]
+
+    let snapshotB =
+        snapshotWithAdditional Library [ domain ] [ schema, """{"name":"B"}""" ]
 
     let identityA = FSharpProjectCacheIdentity.compute snapshotA []
     let identityB = FSharpProjectCacheIdentity.compute snapshotB []
@@ -1319,24 +1767,22 @@ let ``additional text analyzer config updates project cache identity`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
     let schema = fileIn root "schema.json"
+
     let projectWithMode mode =
-        let baseSnapshot = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"Customer"}""" ]
+        let baseSnapshot =
+            snapshotWithAdditional Library [ domain ] [ schema, """{"name":"Customer"}""" ]
 
-        {
-            baseSnapshot with
-                AnalyzerConfigOptions =
-                    {
-                        GlobalOptions = Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
-                        GetOptionsForPath =
-                            fun path ->
-                                let values = Dictionary<string, string>()
+        { baseSnapshot with
+            AnalyzerConfigOptions =
+                { GlobalOptions = Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
+                  GetOptionsForPath =
+                    fun path ->
+                        let values = Dictionary<string, string>()
 
-                                if String.Equals(Path.GetFullPath path, schema, StringComparison.OrdinalIgnoreCase) then
-                                    values["build_metadata.Mode"] <- mode
+                        if String.Equals(Path.GetFullPath path, schema, StringComparison.OrdinalIgnoreCase) then
+                            values["build_metadata.Mode"] <- mode
 
-                                values :> IReadOnlyDictionary<string, string>
-                    }
-        }
+                        values :> IReadOnlyDictionary<string, string> } }
 
     let identityA = FSharpProjectCacheIdentity.compute (projectWithMode "A") []
     let identityB = FSharpProjectCacheIdentity.compute (projectWithMode "B") []
@@ -1347,14 +1793,15 @@ let ``additional text analyzer config updates project cache identity`` () =
 let ``fixed point generation request is rejected`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options =
-        {
-            FSharpGeneratorDriverOptions.defaults with
-                GeneratedRoot = fileIn root "generated"
-                MaxGenerationPasses = 2
-        }
 
-    let result = snapshot Library [ domain ] |> runWith options (ImplementationGenerator("Generated", Prelude))
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated"
+            MaxGenerationPasses = 2 }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (ImplementationGenerator("Generated", Prelude))
 
     Assert.True(hasDiagnostic "FSG0010" result)
     Assert.Empty(result.GeneratedSources)
@@ -1363,8 +1810,13 @@ let ``fixed point generation request is rejected`` () =
 let ``unsupported generator API version is rejected by driver`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (UnsupportedApiGenerator())
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ] |> runWith options (UnsupportedApiGenerator())
 
     Assert.True(hasDiagnostic "FSG0015" result)
     Assert.Empty(result.GeneratedSources)
@@ -1374,56 +1826,95 @@ let ``assembly loader discovers attributed parameterless generators`` () =
     let assemblyPath = Assembly.GetExecutingAssembly().Location
     let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
 
-    Assert.Empty(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Severity = Error && diagnostic.Id <> "FSG0002" && diagnostic.Id <> "FSG0015"))
-    Assert.Contains(result.Generators, fun generator -> generator.GetType().FullName = typeof<LoadableGenerator>.FullName)
-    Assert.DoesNotContain(result.Generators, fun generator -> generator.GetType().FullName = typeof<UnsupportedApiGenerator>.FullName)
+    Assert.Empty(
+        result.Diagnostics
+        |> Seq.filter (fun diagnostic ->
+            diagnostic.Severity = Error
+            && diagnostic.Id <> "FSG0002"
+            && diagnostic.Id <> "FSG0015")
+    )
+
+    Assert.Contains(
+        result.Generators,
+        fun generator -> generator.GetType().FullName = typeof<LoadableGenerator>.FullName
+    )
+
+    Assert.DoesNotContain(
+        result.Generators,
+        fun generator -> generator.GetType().FullName = typeof<UnsupportedApiGenerator>.FullName
+    )
 
 [<Fact>]
 let ``assembly loader reports attributed type without generator interface`` () =
     let assemblyPath = Assembly.GetExecutingAssembly().Location
     let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
 
-    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains(nameof(InvalidAttributedType), StringComparison.Ordinal)))
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic ->
+            diagnostic.Id = "FSG0002"
+            && diagnostic.Message.Contains(nameof (InvalidAttributedType), StringComparison.Ordinal))
+    )
 
 [<Fact>]
 let ``assembly loader reports abstract attributed generator type`` () =
     let assemblyPath = Assembly.GetExecutingAssembly().Location
     let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
 
-    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains(nameof(AbstractAttributedGenerator), StringComparison.Ordinal) && diagnostic.Message.Contains("abstract", StringComparison.OrdinalIgnoreCase)))
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic ->
+            diagnostic.Id = "FSG0002"
+            && diagnostic.Message.Contains(nameof (AbstractAttributedGenerator), StringComparison.Ordinal)
+            && diagnostic.Message.Contains("abstract", StringComparison.OrdinalIgnoreCase))
+    )
 
 [<Fact>]
 let ``assembly loader reports private attributed generator type`` () =
     let assemblyPath = Assembly.GetExecutingAssembly().Location
     let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
 
-    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains("PrivateAttributedGenerator", StringComparison.Ordinal) && diagnostic.Message.Contains("public", StringComparison.OrdinalIgnoreCase)))
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic ->
+            diagnostic.Id = "FSG0002"
+            && diagnostic.Message.Contains("PrivateAttributedGenerator", StringComparison.Ordinal)
+            && diagnostic.Message.Contains("public", StringComparison.OrdinalIgnoreCase))
+    )
 
 [<Fact>]
 let ``assembly loader reports unsupported generator API version`` () =
     let assemblyPath = Assembly.GetExecutingAssembly().Location
     let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
 
-    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0015" && diagnostic.Message.Contains(nameof(UnsupportedApiGenerator), StringComparison.Ordinal)))
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic ->
+            diagnostic.Id = "FSG0015"
+            && diagnostic.Message.Contains(nameof (UnsupportedApiGenerator), StringComparison.Ordinal))
+    )
 
 [<Fact>]
 let ``emit generated files writes configured output path`` () =
     let root = tempRoot ()
     let outputRoot = fileIn root "written"
     let domain = fileIn root "Domain.fs"
-    let options =
-        {
-            FSharpGeneratorDriverOptions.defaults with
-                GeneratedRoot = fileIn root "generated"
-                GeneratedFilesOutputPath = Some outputRoot
-                EmitGeneratedFiles = true
-        }
 
-    let result = snapshot Library [ domain ] |> runWith options (ImplementationGenerator("Generated", Prelude))
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated"
+            GeneratedFilesOutputPath = Some outputRoot
+            EmitGeneratedFiles = true }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (ImplementationGenerator("Generated", Prelude))
 
     Assert.Empty(result.Diagnostics)
 
-    let relativePath = Path.GetRelativePath(Path.GetFullPath(options.GeneratedRoot), result.GeneratedSources.[0].ResolvedPath)
+    let relativePath =
+        Path.GetRelativePath(Path.GetFullPath(options.GeneratedRoot), result.GeneratedSources.[0].ResolvedPath)
+
     let outputPath = Path.Combine(outputRoot, relativePath)
 
     Assert.True(File.Exists(outputPath), outputPath)
@@ -1434,14 +1925,15 @@ let ``report path writes generated source and diagnostic summary`` () =
     let root = tempRoot ()
     let reportPath = fileIn root "reports/generator.json"
     let domain = fileIn root "Domain.fs"
-    let options =
-        {
-            FSharpGeneratorDriverOptions.defaults with
-                GeneratedRoot = fileIn root "generated"
-                ReportPath = Some reportPath
-        }
 
-    let result = snapshot Library [ domain ] |> runWith options (ImplementationGenerator("Generated", Prelude))
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated"
+            ReportPath = Some reportPath }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (ImplementationGenerator("Generated", Prelude))
 
     Assert.Empty(result.Diagnostics)
     Assert.True(File.Exists(reportPath), reportPath)
@@ -1458,15 +1950,16 @@ let ``report path is updated for cached generator runs`` () =
     let root = tempRoot ()
     let reportPath = fileIn root "reports/generator.json"
     let domain = fileIn root "Domain.fs"
+
     let options =
-        {
-            FSharpGeneratorDriverOptions.defaults with
-                GeneratedRoot = fileIn root "generated"
-                ReportPath = Some reportPath
-        }
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated"
+            ReportPath = Some reportPath }
 
     let project = snapshot Library [ domain ]
-    let driver = FSharpGeneratorDriver.Create([ ImplementationGenerator("Generated", Prelude) ], options)
+
+    let driver =
+        FSharpGeneratorDriver.Create([ ImplementationGenerator("Generated", Prelude) ], options)
 
     let updatedDriver, first = driver.RunGenerators(project, CancellationToken.None)
     let _, second = updatedDriver.RunGenerators(project, CancellationToken.None)
@@ -1487,19 +1980,19 @@ let ``generated ordered source list builds in a real FSharp project`` () =
     writeFile consumer "module Consumer\nlet value = GeneratedPrelude.answer + 1"
 
     let options =
-        {
-            FSharpGeneratorDriverOptions.defaults with
-                GeneratedRoot = generatedRoot
-                EmitGeneratedFiles = true
-                GeneratedFilesOutputPath = Some generatedRoot
-        }
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = generatedRoot
+            EmitGeneratedFiles = true
+            GeneratedFilesOutputPath = Some generatedRoot }
 
-    let result = snapshot Library [ consumer ] |> runWith options (BuildHarnessGenerator())
+    let result =
+        snapshot Library [ consumer ] |> runWith options (BuildHarnessGenerator())
 
     Assert.Empty(result.Diagnostics)
     writeFSharpProject projectPath result.UpdatedSourceFiles
 
     let exitCode, output = runDotnetBuild projectPath
+
     if exitCode <> 0 then
         failwith output
 
@@ -1513,14 +2006,14 @@ let ``generated signature and implementation pair builds in resolved order`` () 
     writeFile consumer "module Consumer\nlet value: int = GeneratedContract.answer"
 
     let options =
-        {
-            FSharpGeneratorDriverOptions.defaults with
-                GeneratedRoot = generatedRoot
-                EmitGeneratedFiles = true
-                GeneratedFilesOutputPath = Some generatedRoot
-        }
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = generatedRoot
+            EmitGeneratedFiles = true
+            GeneratedFilesOutputPath = Some generatedRoot }
 
-    let result = snapshot Library [ consumer ] |> runWith options (BuildHarnessSignaturePairGenerator())
+    let result =
+        snapshot Library [ consumer ]
+        |> runWith options (BuildHarnessSignaturePairGenerator())
 
     Assert.Empty(result.Diagnostics)
     Assert.Equal(Signature, result.GeneratedSources.[0].Kind)
@@ -1528,6 +2021,7 @@ let ``generated signature and implementation pair builds in resolved order`` () 
     writeFSharpProject projectPath result.UpdatedSourceFiles
 
     let exitCode, output = runDotnetBuild projectPath
+
     if exitCode <> 0 then
         failwith output
 
@@ -1541,14 +2035,14 @@ let ``post initialization generated attribute can be referenced from user source
     writeFile consumer "module Consumer\n\n[<GeneratedSupport.GeneratedMarker>]\nlet value = 42"
 
     let options =
-        {
-            FSharpGeneratorDriverOptions.defaults with
-                GeneratedRoot = generatedRoot
-                EmitGeneratedFiles = true
-                GeneratedFilesOutputPath = Some generatedRoot
-        }
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = generatedRoot
+            EmitGeneratedFiles = true
+            GeneratedFilesOutputPath = Some generatedRoot }
 
-    let result = snapshot Library [ consumer ] |> runWith options (PostInitializationAttributeGenerator())
+    let result =
+        snapshot Library [ consumer ]
+        |> runWith options (PostInitializationAttributeGenerator())
 
     Assert.Empty(result.Diagnostics)
     let generatedSource = Assert.Single(result.GeneratedSources)
@@ -1557,6 +2051,7 @@ let ``post initialization generated attribute can be referenced from user source
     writeFSharpProject projectPath result.UpdatedSourceFiles
 
     let exitCode, output = runDotnetBuild projectPath
+
     if exitCode <> 0 then
         failwith output
 
@@ -1564,8 +2059,15 @@ let ``post initialization generated attribute can be referenced from user source
 let ``source outputs can see post initialization generated sources`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
-    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
-    let result = snapshot Library [ domain ] |> runWith options (PostInitializationVisibleToSourceOutputGenerator())
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (PostInitializationVisibleToSourceOutputGenerator())
+
     let hintNames = result.GeneratedSources |> Seq.map _.HintName |> Seq.toArray
 
     Assert.Empty(result.Diagnostics)
@@ -1583,15 +2085,13 @@ let ``command line parser extracts generator options and preserves unrelated arg
 
     let result =
         FSharpSourceGeneratorConfiguration.parseCommandLineArguments
-            [
-                "--target:library"
-                "--fsharp-source-generator:" + generatorPath
-                "--fsharp-generator-additional-file:" + additionalPath
-                "--fsharp-source-generator-analyzer-config:" + analyzerConfigPath
-                "--emit-fsharp-generated-files+"
-                "--fsharp-generated-files-output:" + outputPath
-                "--fsharp-source-generator-report:" + reportPath
-            ]
+            [ "--target:library"
+              "--fsharp-source-generator:" + generatorPath
+              "--fsharp-generator-additional-file:" + additionalPath
+              "--fsharp-source-generator-analyzer-config:" + analyzerConfigPath
+              "--emit-fsharp-generated-files+"
+              "--fsharp-generated-files-output:" + outputPath
+              "--fsharp-source-generator-report:" + reportPath ]
 
     Assert.Empty(result.Diagnostics)
     Assert.Equal<string array>([| "--target:library" |], result.RemainingArguments |> Seq.toArray)
@@ -1607,12 +2107,14 @@ let ``command line parser extracts generator options and preserves unrelated arg
 let ``command line parser reports invalid source generator switches`` () =
     let result =
         FSharpSourceGeneratorConfiguration.parseCommandLineArguments
-            [
-                "--fsharp-source-generator:"
-                "--emit-fsharp-generated-files:maybe"
-            ]
+            [ "--fsharp-source-generator:"; "--emit-fsharp-generated-files:maybe" ]
 
-    Assert.Equal(2, result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011") |> Seq.length)
+    Assert.Equal(
+        2,
+        result.Diagnostics
+        |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011")
+        |> Seq.length
+    )
 
 [<Fact>]
 let ``MSBuild configuration maps items and properties to driver options`` () =
@@ -1626,11 +2128,9 @@ let ``MSBuild configuration maps items and properties to driver options`` () =
         FSharpSourceGeneratorConfiguration.fromMSBuildItems
             [ { Include = generatorPath } ]
             [ { Include = additionalPath } ]
-            {
-                EmitFSharpGeneratedFiles = Some "true"
-                FSharpGeneratedFilesOutputPath = Some outputPath
-                FSharpSourceGeneratorReportPath = Some reportPath
-            }
+            { EmitFSharpGeneratedFiles = Some "true"
+              FSharpGeneratedFilesOutputPath = Some outputPath
+              FSharpSourceGeneratorReportPath = Some reportPath }
 
     Assert.Empty(result.Diagnostics)
     Assert.Equal(generatorPath, result.Configuration.GeneratorPaths.[0])
@@ -1643,24 +2143,30 @@ let ``MSBuild configuration maps items and properties to driver options`` () =
 [<Fact>]
 let ``MSBuild source generator item loads generator assembly`` () =
     let generatorAssembly =
-        Path.Combine(repoRoot (), "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        Path.Combine(
+            repoRoot (),
+            "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll"
+        )
         |> Path.GetFullPath
 
     let result =
         FSharpSourceGeneratorConfiguration.fromMSBuildItems
             [ { Include = generatorAssembly } ]
             []
-            {
-                EmitFSharpGeneratedFiles = None
-                FSharpGeneratedFilesOutputPath = None
-                FSharpSourceGeneratorReportPath = None
-            }
+            { EmitFSharpGeneratedFiles = None
+              FSharpGeneratedFilesOutputPath = None
+              FSharpSourceGeneratorReportPath = None }
 
-    let loadResult = FSharpSourceGeneratorConfiguration.loadGenerators result.Configuration
+    let loadResult =
+        FSharpSourceGeneratorConfiguration.loadGenerators result.Configuration
 
     Assert.Empty(result.Diagnostics)
     Assert.Empty(loadResult.Diagnostics)
-    Assert.Contains(loadResult.Generators, fun generator -> generator.GetType().FullName = "FSharpNativeGenerator.TestGenerators.CliHarnessGenerator")
+
+    Assert.Contains(
+        loadResult.Generators,
+        fun generator -> generator.GetType().FullName = "FSharpNativeGenerator.TestGenerators.CliHarnessGenerator"
+    )
 
 [<Fact>]
 let ``MSBuild configuration reports invalid boolean property`` () =
@@ -1668,11 +2174,9 @@ let ``MSBuild configuration reports invalid boolean property`` () =
         FSharpSourceGeneratorConfiguration.fromMSBuildItems
             []
             []
-            {
-                EmitFSharpGeneratedFiles = Some "sometimes"
-                FSharpGeneratedFilesOutputPath = None
-                FSharpSourceGeneratorReportPath = None
-            }
+            { EmitFSharpGeneratedFiles = Some "sometimes"
+              FSharpGeneratedFilesOutputPath = None
+              FSharpSourceGeneratorReportPath = None }
 
     Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0011"))
 
@@ -1684,11 +2188,10 @@ let ``configuration creates additional text snapshots from files`` () =
 
     let result =
         FSharpSourceGeneratorConfiguration.parseCommandLineArguments
-            [
-                "--fsharp-generator-additional-file:" + additionalPath
-            ]
+            [ "--fsharp-generator-additional-file:" + additionalPath ]
 
-    let additionalText = Assert.Single(FSharpSourceGeneratorConfiguration.additionalTexts result.Configuration)
+    let additionalText =
+        Assert.Single(FSharpSourceGeneratorConfiguration.additionalTexts result.Configuration)
 
     Assert.Equal(additionalPath, additionalText.Path)
     Assert.True(additionalText.Checksum.IsSome)
@@ -1701,14 +2204,17 @@ let ``configuration reports missing additional files with file path`` () =
 
     let result =
         FSharpSourceGeneratorConfiguration.parseCommandLineArguments
-            [
-                "--fsharp-generator-additional-file:" + additionalPath
-            ]
+            [ "--fsharp-generator-additional-file:" + additionalPath ]
 
-    let additionalTextsResult = FSharpSourceGeneratorConfiguration.additionalTextsWithDiagnostics result.Configuration
+    let additionalTextsResult =
+        FSharpSourceGeneratorConfiguration.additionalTextsWithDiagnostics result.Configuration
 
     Assert.Single(additionalTextsResult.AdditionalTexts) |> ignore
-    Assert.True(additionalTextsResult.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0011" && diagnostic.FilePath = Some additionalPath))
+
+    Assert.True(
+        additionalTextsResult.Diagnostics
+        |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0011" && diagnostic.FilePath = Some additionalPath)
+    )
 
 [<Fact>]
 let ``configuration loads global and per-path analyzer config options`` () =
@@ -1728,11 +2234,11 @@ dotnet_diagnostic.test.severity = warning
 
     let parsed =
         FSharpSourceGeneratorConfiguration.parseCommandLineArguments
-            [
-                "--fsharp-source-generator-analyzer-config:" + configPath
-            ]
+            [ "--fsharp-source-generator-analyzer-config:" + configPath ]
 
-    let result = FSharpSourceGeneratorConfiguration.analyzerConfigOptions parsed.Configuration
+    let result =
+        FSharpSourceGeneratorConfiguration.analyzerConfigOptions parsed.Configuration
+
     let sourceOptions = result.Options.GetOptionsForPath sourcePath
 
     Assert.Empty(result.Diagnostics)
@@ -1745,48 +2251,66 @@ dotnet_diagnostic.test.severity = warning
 let ``configuration reports missing analyzer config files`` () =
     let root = tempRoot ()
     let missingConfigPath = fileIn root "missing.globalconfig"
+
     let parsed =
         FSharpSourceGeneratorConfiguration.parseCommandLineArguments
-            [
-                "--fsharp-source-generator-analyzer-config:" + missingConfigPath
-            ]
+            [ "--fsharp-source-generator-analyzer-config:" + missingConfigPath ]
 
-    let result = FSharpSourceGeneratorConfiguration.analyzerConfigOptions parsed.Configuration
+    let result =
+        FSharpSourceGeneratorConfiguration.analyzerConfigOptions parsed.Configuration
 
-    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0011" && diagnostic.FilePath = Some missingConfigPath))
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0011" && diagnostic.FilePath = Some missingConfigPath)
+    )
 
 [<Fact>]
 let ``configuration loads generators from configured assembly paths`` () =
     let assemblyPath = Assembly.GetExecutingAssembly().Location
+
     let result =
-        FSharpSourceGeneratorConfiguration.parseCommandLineArguments
-            [
-                "--fsharp-source-generator:" + assemblyPath
-            ]
+        FSharpSourceGeneratorConfiguration.parseCommandLineArguments [ "--fsharp-source-generator:" + assemblyPath ]
 
-    let loadResult = FSharpSourceGeneratorConfiguration.loadGenerators result.Configuration
+    let loadResult =
+        FSharpSourceGeneratorConfiguration.loadGenerators result.Configuration
 
-    Assert.Contains(loadResult.Generators, fun generator -> generator.GetType().FullName = typeof<LoadableGenerator>.FullName)
+    Assert.Contains(
+        loadResult.Generators,
+        fun generator -> generator.GetType().FullName = typeof<LoadableGenerator>.FullName
+    )
 
 [<Fact>]
 let ``NuGet analyzer folder generator loads from analyzers dotnet fs`` () =
     let root = tempRoot ()
     let packageRoot = fileIn root "package"
     let analyzerFolder = Path.Combine(packageRoot, "analyzers", "dotnet", "fs")
+
     let sourceGeneratorAssembly =
-        Path.Combine(repoRoot (), "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        Path.Combine(
+            repoRoot (),
+            "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll"
+        )
         |> Path.GetFullPath
-    let packagedGeneratorAssembly = Path.Combine(analyzerFolder, "FSharpNativeGenerator.TestGenerators.dll")
+
+    let packagedGeneratorAssembly =
+        Path.Combine(analyzerFolder, "FSharpNativeGenerator.TestGenerators.dll")
 
     Directory.CreateDirectory(analyzerFolder) |> ignore
     File.Copy(sourceGeneratorAssembly, packagedGeneratorAssembly)
 
-    let generatorPaths = FSharpSourceGeneratorConfiguration.generatorPathsFromNuGetPackage packageRoot
-    let loadResult = FSharpSourceGeneratorConfiguration.loadGeneratorsFromNuGetPackage packageRoot
+    let generatorPaths =
+        FSharpSourceGeneratorConfiguration.generatorPathsFromNuGetPackage packageRoot
+
+    let loadResult =
+        FSharpSourceGeneratorConfiguration.loadGeneratorsFromNuGetPackage packageRoot
 
     Assert.Equal<string array>([| packagedGeneratorAssembly |], generatorPaths |> Seq.toArray)
     Assert.Empty(loadResult.Diagnostics)
-    Assert.Contains(loadResult.Generators, fun generator -> generator.GetType().FullName = "FSharpNativeGenerator.TestGenerators.CliHarnessGenerator")
+
+    Assert.Contains(
+        loadResult.Generators,
+        fun generator -> generator.GetType().FullName = "FSharpNativeGenerator.TestGenerators.CliHarnessGenerator"
+    )
 
 [<Fact>]
 let ``NuGet analyzer folder loading reports missing fs analyzer folder`` () =
@@ -1794,9 +2318,13 @@ let ``NuGet analyzer folder loading reports missing fs analyzer folder`` () =
     let packageRoot = fileIn root "package"
     Directory.CreateDirectory(packageRoot) |> ignore
 
-    let loadResult = FSharpSourceGeneratorConfiguration.loadGeneratorsFromNuGetPackage packageRoot
+    let loadResult =
+        FSharpSourceGeneratorConfiguration.loadGeneratorsFromNuGetPackage packageRoot
 
-    Assert.True(loadResult.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0001" && diagnostic.FilePath = Some packageRoot))
+    Assert.True(
+        loadResult.Diagnostics
+        |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0001" && diagnostic.FilePath = Some packageRoot)
+    )
 
 [<Fact>]
 let ``CLI runs generators without MSBuild and prints updated source list`` () =
@@ -1805,9 +2333,16 @@ let ``CLI runs generators without MSBuild and prints updated source list`` () =
     let generatedOutput = fileIn root "generated"
     let reportPath = fileIn root "report.json"
     let repositoryRoot = repoRoot ()
-    let cliProject = Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj") |> Path.GetFullPath
+
+    let cliProject =
+        Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj")
+        |> Path.GetFullPath
+
     let generatorAssembly =
-        Path.Combine(repositoryRoot, "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        Path.Combine(
+            repositoryRoot,
+            "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll"
+        )
         |> Path.GetFullPath
 
     writeFile consumer "module Consumer\nlet value = GeneratedPrelude.answer"
@@ -1815,17 +2350,15 @@ let ``CLI runs generators without MSBuild and prints updated source list`` () =
     let arguments =
         String.concat
             " "
-            [
-                "run"
-                "--project"
-                "\"" + cliProject + "\""
-                "--"
-                "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
-                "--emit-fsharp-generated-files+"
-                "--fsharp-generated-files-output:" + "\"" + generatedOutput + "\""
-                "--fsharp-source-generator-report:" + "\"" + reportPath + "\""
-                "\"" + consumer + "\""
-            ]
+            [ "run"
+              "--project"
+              "\"" + cliProject + "\""
+              "--"
+              "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
+              "--emit-fsharp-generated-files+"
+              "--fsharp-generated-files-output:" + "\"" + generatedOutput + "\""
+              "--fsharp-source-generator-report:" + "\"" + reportPath + "\""
+              "\"" + consumer + "\"" ]
 
     let exitCode, output, error = runProcess "dotnet" arguments root
 
@@ -1837,6 +2370,7 @@ let ``CLI runs generators without MSBuild and prints updated source list`` () =
 
     use report = JsonDocument.Parse(File.ReadAllText(reportPath))
     let generatedSources = report.RootElement.GetProperty("GeneratedSources")
+
     let generatedPrelude =
         generatedSources.EnumerateArray()
         |> Seq.find (fun item -> item.GetProperty("HintName").GetString() = "GeneratedPrelude")
@@ -1853,9 +2387,16 @@ let ``CLI passes real source text snapshots to loaded generators`` () =
     let generatedOutput = fileIn root "generated"
     let reportPath = fileIn root "report.json"
     let repositoryRoot = repoRoot ()
-    let cliProject = Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj") |> Path.GetFullPath
+
+    let cliProject =
+        Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj")
+        |> Path.GetFullPath
+
     let generatorAssembly =
-        Path.Combine(repositoryRoot, "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        Path.Combine(
+            repositoryRoot,
+            "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll"
+        )
         |> Path.GetFullPath
 
     writeFile consumer "module Consumer\n// SOURCE_TEXT_MARKER\nlet value = GeneratedPrelude.answer"
@@ -1863,17 +2404,15 @@ let ``CLI passes real source text snapshots to loaded generators`` () =
     let arguments =
         String.concat
             " "
-            [
-                "run"
-                "--project"
-                "\"" + cliProject + "\""
-                "--"
-                "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
-                "--emit-fsharp-generated-files+"
-                "--fsharp-generated-files-output:" + "\"" + generatedOutput + "\""
-                "--fsharp-source-generator-report:" + "\"" + reportPath + "\""
-                "\"" + consumer + "\""
-            ]
+            [ "run"
+              "--project"
+              "\"" + cliProject + "\""
+              "--"
+              "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
+              "--emit-fsharp-generated-files+"
+              "--fsharp-generated-files-output:" + "\"" + generatedOutput + "\""
+              "--fsharp-source-generator-report:" + "\"" + reportPath + "\""
+              "\"" + consumer + "\"" ]
 
     let exitCode, output, error = runProcess "dotnet" arguments root
 
@@ -1883,16 +2422,26 @@ let ``CLI passes real source text snapshots to loaded generators`` () =
     use report = JsonDocument.Parse(File.ReadAllText(reportPath))
     let generatedSources = report.RootElement.GetProperty("GeneratedSources")
 
-    Assert.True(generatedSources.EnumerateArray() |> Seq.exists (fun item -> item.GetProperty("HintName").GetString() = "SawRealSourceText"))
+    Assert.True(
+        generatedSources.EnumerateArray()
+        |> Seq.exists (fun item -> item.GetProperty("HintName").GetString() = "SawRealSourceText")
+    )
 
 [<Fact>]
 let ``CLI reports missing source files`` () =
     let root = tempRoot ()
     let missing = fileIn root "Missing.fs"
     let repositoryRoot = repoRoot ()
-    let cliProject = Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj") |> Path.GetFullPath
+
+    let cliProject =
+        Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj")
+        |> Path.GetFullPath
+
     let generatorAssembly =
-        Path.Combine(repositoryRoot, "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        Path.Combine(
+            repositoryRoot,
+            "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll"
+        )
         |> Path.GetFullPath
 
     Directory.CreateDirectory(root) |> ignore
@@ -1900,14 +2449,12 @@ let ``CLI reports missing source files`` () =
     let arguments =
         String.concat
             " "
-            [
-                "run"
-                "--project"
-                "\"" + cliProject + "\""
-                "--"
-                "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
-                "\"" + missing + "\""
-            ]
+            [ "run"
+              "--project"
+              "\"" + cliProject + "\""
+              "--"
+              "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
+              "\"" + missing + "\"" ]
 
     let exitCode, _, error = runProcess "dotnet" arguments root
 
@@ -1923,9 +2470,16 @@ let ``CLI passes analyzer config options to loaded generators`` () =
     let generatedOutput = fileIn root "generated"
     let reportPath = fileIn root "report.json"
     let repositoryRoot = repoRoot ()
-    let cliProject = Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj") |> Path.GetFullPath
+
+    let cliProject =
+        Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj")
+        |> Path.GetFullPath
+
     let generatorAssembly =
-        Path.Combine(repositoryRoot, "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        Path.Combine(
+            repositoryRoot,
+            "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll"
+        )
         |> Path.GetFullPath
 
     writeFile consumer "module Consumer\nlet value = ConfiguredPrelude.answer"
@@ -1934,18 +2488,16 @@ let ``CLI passes analyzer config options to loaded generators`` () =
     let arguments =
         String.concat
             " "
-            [
-                "run"
-                "--project"
-                "\"" + cliProject + "\""
-                "--"
-                "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
-                "--fsharp-source-generator-analyzer-config:" + "\"" + configPath + "\""
-                "--emit-fsharp-generated-files+"
-                "--fsharp-generated-files-output:" + "\"" + generatedOutput + "\""
-                "--fsharp-source-generator-report:" + "\"" + reportPath + "\""
-                "\"" + consumer + "\""
-            ]
+            [ "run"
+              "--project"
+              "\"" + cliProject + "\""
+              "--"
+              "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
+              "--fsharp-source-generator-analyzer-config:" + "\"" + configPath + "\""
+              "--emit-fsharp-generated-files+"
+              "--fsharp-generated-files-output:" + "\"" + generatedOutput + "\""
+              "--fsharp-source-generator-report:" + "\"" + reportPath + "\""
+              "\"" + consumer + "\"" ]
 
     let exitCode, output, error = runProcess "dotnet" arguments root
 
@@ -1954,6 +2506,7 @@ let ``CLI passes analyzer config options to loaded generators`` () =
 
     use report = JsonDocument.Parse(File.ReadAllText(reportPath))
     let generatedSources = report.RootElement.GetProperty("GeneratedSources")
+
     let configuredPrelude =
         generatedSources.EnumerateArray()
         |> Seq.find (fun item -> item.GetProperty("HintName").GetString() = "ConfiguredPrelude")

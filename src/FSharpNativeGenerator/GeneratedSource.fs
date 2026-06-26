@@ -13,15 +13,14 @@ open FSharp.Compiler.Text
 module internal GeneratedPaths =
     let private invalidChars =
         Array.concat
-            [
-                Path.GetInvalidFileNameChars()
-                [| '<'; '>'; ':'; '"'; '/'; '\\'; '|'; '?'; '*' |]
-            ]
+            [ Path.GetInvalidFileNameChars()
+              [| '<'; '>'; ':'; '"'; '/'; '\\'; '|'; '?'; '*' |] ]
         |> Array.distinct
         |> String
         |> Regex.Escape
 
-    let private invalidPattern = Regex(sprintf "[%s]+" invalidChars, RegexOptions.Compiled)
+    let private invalidPattern =
+        Regex(sprintf "[%s]+" invalidChars, RegexOptions.Compiled)
 
     let stripKnownExtension (hintName: string) =
         if hintName.EndsWith(".fsi", StringComparison.OrdinalIgnoreCase) then
@@ -32,8 +31,7 @@ module internal GeneratedPaths =
             hintName
 
     let sanitizeSegment (value: string) =
-        let cleaned =
-            invalidPattern.Replace(stripKnownExtension value, "_")
+        let cleaned = invalidPattern.Replace(stripKnownExtension value, "_")
 
         if String.IsNullOrWhiteSpace(cleaned) then
             "Generated"
@@ -48,7 +46,9 @@ module internal GeneratedPaths =
     let conflictsWithKind kind (hintName: string) =
         match kind with
         | Implementation -> hintName.EndsWith(".fsi", StringComparison.OrdinalIgnoreCase)
-        | Signature -> hintName.EndsWith(".fs", StringComparison.OrdinalIgnoreCase) && not (hintName.EndsWith(".fsi", StringComparison.OrdinalIgnoreCase))
+        | Signature ->
+            hintName.EndsWith(".fs", StringComparison.OrdinalIgnoreCase)
+            && not (hintName.EndsWith(".fsi", StringComparison.OrdinalIgnoreCase))
 
     let resolvedPath generatedRoot generatorName kind hintName =
         Path.Combine(generatedRoot, sanitizeSegment generatorName, sanitizeSegment hintName + extensionFor kind)
@@ -63,36 +63,36 @@ module internal Diagnostics =
 
 module internal RunReport =
     let private generatedSourceReport (source: FSharpGeneratedSource) =
-        {
-            GeneratorName = source.GeneratorName
-            HintName = source.HintName
-            ResolvedPath = source.ResolvedPath
-            Kind = string source.Kind
-            Placement = string source.Placement
-            Checksum = Hashing.toHex source.Checksum
-        }
+        { GeneratorName = source.GeneratorName
+          HintName = source.HintName
+          ResolvedPath = source.ResolvedPath
+          Kind = string source.Kind
+          Placement = string source.Placement
+          Checksum = Hashing.toHex source.Checksum }
 
     let private diagnosticReport (diagnostic: FSharpGeneratorDiagnostic) =
-        {
-            Id = diagnostic.Id
-            Message = diagnostic.Message
-            Severity = string diagnostic.Severity
-            FilePath = diagnostic.FilePath
-        }
+        { Id = diagnostic.Id
+          Message = diagnostic.Message
+          Severity = string diagnostic.Severity
+          FilePath = diagnostic.FilePath }
 
     let write path (result: FSharpGeneratorDriverRunResult) =
         let report =
-            {
-                GeneratedSources = result.GeneratedSources |> Seq.map generatedSourceReport |> ImmutableArray.CreateRange
-                Diagnostics = result.Diagnostics |> Seq.map diagnosticReport |> ImmutableArray.CreateRange
-                UpdatedSourceFiles = result.UpdatedSourceFiles
-                ElapsedMilliseconds = result.ElapsedMilliseconds
-                CacheHit = result.CacheHit
-            }
+            { GeneratedSources =
+                result.GeneratedSources
+                |> Seq.map generatedSourceReport
+                |> ImmutableArray.CreateRange
+              Diagnostics = result.Diagnostics |> Seq.map diagnosticReport |> ImmutableArray.CreateRange
+              UpdatedSourceFiles = result.UpdatedSourceFiles
+              ElapsedMilliseconds = result.ElapsedMilliseconds
+              CacheHit = result.CacheHit }
 
         let options = JsonSerializerOptions(WriteIndented = true)
         let json = JsonSerializer.Serialize(report, options)
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))) |> ignore
+
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)))
+        |> ignore
+
         File.WriteAllText(path, json, Encoding.UTF8)
 
 module internal GeneratedSourceValidation =
@@ -120,12 +120,14 @@ module internal GeneratedSourceValidation =
         let rec loop (remainingOptions: string list) values =
             match remainingOptions with
             | [] -> List.rev values
-            | option :: value :: tail when names.Contains(option.ToUpperInvariant()) && not (String.IsNullOrWhiteSpace value) ->
+            | option :: value :: tail when
+                names.Contains(option.ToUpperInvariant())
+                && not (String.IsNullOrWhiteSpace value)
+                ->
                 loop tail (value :: values)
             | option :: tail ->
                 let prefixedValue =
-                    prefixes
-                    |> List.tryPick (fun prefix -> tryPrefixedValue prefix option)
+                    prefixes |> List.tryPick (fun prefix -> tryPrefixedValue prefix option)
 
                 match prefixedValue with
                 | Some value -> loop tail (value :: values)
@@ -146,14 +148,17 @@ module internal GeneratedSourceValidation =
         parseOptionValues (set [ "--LANGVERSION" ]) [ "--langversion:" ] projectOptions.OtherOptions
         |> List.tryLast
 
-    let private parsingOptions (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions) (sourcePath: string) =
-        {
-            FSharpParsingOptions.Default with
-                SourceFiles = [| sourcePath |]
-                ConditionalDefines = conditionalDefines projectOptions
-                LangVersionText = languageVersion projectOptions |> Option.defaultValue FSharpParsingOptions.Default.LangVersionText
-                IsExe = projectOptions.OutputKind = Application
-        }
+    let private parsingOptions
+        (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions)
+        (sourcePath: string)
+        =
+        { FSharpParsingOptions.Default with
+            SourceFiles = [| sourcePath |]
+            ConditionalDefines = conditionalDefines projectOptions
+            LangVersionText =
+                languageVersion projectOptions
+                |> Option.defaultValue FSharpParsingOptions.Default.LangVersionText
+            IsExe = projectOptions.OutputKind = Application }
 
     let private diagnosticSeverity (severity: FSharp.Compiler.Diagnostics.FSharpDiagnosticSeverity) =
         match severity with
@@ -163,15 +168,16 @@ module internal GeneratedSourceValidation =
 
     let private diagnosticRange (diagnostic: FSharp.Compiler.Diagnostics.FSharpDiagnostic) =
         Some
-            {
-                FilePath = diagnostic.FileName
-                StartLine = diagnostic.StartLine
-                StartColumn = diagnostic.StartColumn
-                EndLine = diagnostic.EndLine
-                EndColumn = diagnostic.EndColumn
-            }
+            { FilePath = diagnostic.FileName
+              StartLine = diagnostic.StartLine
+              StartColumn = diagnostic.StartColumn
+              EndLine = diagnostic.EndLine
+              EndColumn = diagnostic.EndColumn }
 
-    let private parseDiagnostics (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions) (source: FSharpGeneratedSource) =
+    let private parseDiagnostics
+        (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions)
+        (source: FSharpGeneratedSource)
+        =
         let sourceText = SourceText.ofString source.SourceText.Text
         let parseOptions = parsingOptions projectOptions source.ResolvedPath
 
@@ -179,15 +185,16 @@ module internal GeneratedSourceValidation =
         |> Async.RunSynchronously
         |> _.Diagnostics
         |> Seq.map (fun diagnostic ->
-            {
-                Id = "FSG0005"
-                Message = sprintf "Generated source '%s' parse failed: %s" source.HintName diagnostic.Message
-                Severity = diagnosticSeverity diagnostic.Severity
-                Range = diagnosticRange diagnostic
-                FilePath = Some source.ResolvedPath
-            })
+            { Id = "FSG0005"
+              Message = sprintf "Generated source '%s' parse failed: %s" source.HintName diagnostic.Message
+              Severity = diagnosticSeverity diagnostic.Severity
+              Range = diagnosticRange diagnostic
+              FilePath = Some source.ResolvedPath })
 
-    let validate (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions) (source: FSharpGeneratedSource) =
+    let validate
+        (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions)
+        (source: FSharpGeneratedSource)
+        =
         seq {
             if String.IsNullOrWhiteSpace source.SourceText.Text then
                 yield
@@ -196,7 +203,11 @@ module internal GeneratedSourceValidation =
 
             elif not (hasExplicitModuleOrNamespace source.SourceText) then
                 yield
-                    Diagnostics.error "FSG0005" (sprintf "Generated source '%s' must include an explicit module or namespace declaration." source.HintName)
+                    Diagnostics.error
+                        "FSG0005"
+                        (sprintf
+                            "Generated source '%s' must include an explicit module or namespace declaration."
+                            source.HintName)
                     |> Diagnostics.withPath source.ResolvedPath
             else
                 yield! parseDiagnostics projectOptions source
@@ -204,11 +215,9 @@ module internal GeneratedSourceValidation =
 
 module internal Placement =
     type Unit =
-        {
-            Placement: FSharpGeneratedSourcePlacement
-            Paths: string list
-            Sources: FSharpGeneratedSource list
-        }
+        { Placement: FSharpGeneratedSourcePlacement
+          Paths: string list
+          Sources: FSharpGeneratedSource list }
 
     let private samePath left right =
         String.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase)
@@ -229,16 +238,16 @@ module internal Placement =
         |> Option.map fst
 
     let private hintList units =
-        units
-        |> List.collect _.Sources
-        |> List.map _.HintName
-        |> String.concat ", "
+        units |> List.collect _.Sources |> List.map _.HintName |> String.concat ", "
 
     let private normalizedHint hintName =
-        GeneratedPaths.stripKnownExtension hintName
-        |> _.ToUpperInvariant()
+        GeneratedPaths.stripKnownExtension hintName |> _.ToUpperInvariant()
 
-    let buildUnits (originalImplementationHints: Set<string>) (generatedSources: FSharpGeneratedSource list) (pending: PendingGeneratedSource list) =
+    let buildUnits
+        (originalImplementationHints: Set<string>)
+        (generatedSources: FSharpGeneratedSource list)
+        (pending: PendingGeneratedSource list)
+        =
         let signatures: FSharpGeneratedSource list =
             generatedSources |> List.filter (fun source -> source.Kind = Signature)
 
@@ -258,13 +267,38 @@ module internal Placement =
         for pendingSignature in pending |> List.filter (fun source -> source.Kind = Signature) do
             match pendingSignature.CompanionImplementationHintName with
             | None ->
-                diagnostics.Add(Diagnostics.error "FSG0008" (sprintf "Generated signature '%s' does not specify a generated implementation companion." pendingSignature.HintName))
+                diagnostics.Add(
+                    Diagnostics.error
+                        "FSG0008"
+                        (sprintf
+                            "Generated signature '%s' does not specify a generated implementation companion."
+                            pendingSignature.HintName)
+                )
             | Some companionHint ->
-                if not (implementationByGeneratorAndHint.ContainsKey((pendingSignature.GeneratorName, companionHint))) then
-                    if isOriginalImplementationHint companionHint || isOriginalImplementationHint pendingSignature.HintName then
-                        diagnostics.Add(Diagnostics.error "FSG0014" (sprintf "Generated signature '%s' targets user implementation '%s'. Generated signatures for user-authored implementations are not supported in V1." pendingSignature.HintName companionHint))
+                if
+                    not (implementationByGeneratorAndHint.ContainsKey((pendingSignature.GeneratorName, companionHint)))
+                then
+                    if
+                        isOriginalImplementationHint companionHint
+                        || isOriginalImplementationHint pendingSignature.HintName
+                    then
+                        diagnostics.Add(
+                            Diagnostics.error
+                                "FSG0014"
+                                (sprintf
+                                    "Generated signature '%s' targets user implementation '%s'. Generated signatures for user-authored implementations are not supported in V1."
+                                    pendingSignature.HintName
+                                    companionHint)
+                        )
                     else
-                        diagnostics.Add(Diagnostics.error "FSG0008" (sprintf "Generated signature '%s' references missing implementation companion '%s'." pendingSignature.HintName companionHint))
+                        diagnostics.Add(
+                            Diagnostics.error
+                                "FSG0008"
+                                (sprintf
+                                    "Generated signature '%s' references missing implementation companion '%s'."
+                                    pendingSignature.HintName
+                                    companionHint)
+                        )
 
         let duplicateSignatureCompanions =
             pending
@@ -282,7 +316,15 @@ module internal Placement =
                     None)
 
         for (generatorName, companion, signatureHintNames) in duplicateSignatureCompanions do
-            diagnostics.Add(Diagnostics.error "FSG0008" (sprintf "Generator '%s' emitted multiple generated signatures for implementation companion '%s': %s." generatorName companion (String.concat ", " signatureHintNames)))
+            diagnostics.Add(
+                Diagnostics.error
+                    "FSG0008"
+                    (sprintf
+                        "Generator '%s' emitted multiple generated signatures for implementation companion '%s': %s."
+                        generatorName
+                        companion
+                        (String.concat ", " signatureHintNames))
+            )
 
         let signatureCompanionHints =
             pending
@@ -305,17 +347,13 @@ module internal Placement =
                                 && pendingSource.HintName = signature.HintName
                                 && pendingSource.CompanionImplementationHintName = Some implementation.HintName))
 
-                    {
-                        Placement = implementation.Placement
-                        Paths = (companionSignatures @ [ implementation ]) |> List.map _.ResolvedPath
-                        Sources = companionSignatures @ [ implementation ]
-                    }
+                    { Placement = implementation.Placement
+                      Paths = (companionSignatures @ [ implementation ]) |> List.map _.ResolvedPath
+                      Sources = companionSignatures @ [ implementation ] }
                 else
-                    {
-                        Placement = implementation.Placement
-                        Paths = [ implementation.ResolvedPath ]
-                        Sources = [ implementation ]
-                    })
+                    { Placement = implementation.Placement
+                      Paths = [ implementation.ResolvedPath ]
+                      Sources = [ implementation ] })
 
         units, diagnostics |> Seq.toList
 
@@ -324,8 +362,7 @@ module internal Placement =
         let original = originalSourceFiles |> List.map Path.GetFullPath
         let generatedPathSet = generatedPaths |> Seq.map Path.GetFullPath |> Set.ofSeq
 
-        let prelude, rest =
-            units |> List.partition (fun unit -> unit.Placement = Prelude)
+        let prelude, rest = units |> List.partition (fun unit -> unit.Placement = Prelude)
 
         let beforeLast, rest =
             rest |> List.partition (fun unit -> unit.Placement = BeforeLastSourceFile)
@@ -337,18 +374,29 @@ module internal Placement =
 
         match finalOriginalImplementationIndex original with
         | Some finalOriginalIndex ->
-            let mutable adjustedIndex = finalOriginalIndex + (prelude |> List.sumBy (fun unit -> unit.Paths.Length))
+            let mutable adjustedIndex =
+                finalOriginalIndex + (prelude |> List.sumBy (fun unit -> unit.Paths.Length))
+
             for unit in beforeLast do
                 ordered <- insertAt adjustedIndex unit.Paths ordered
                 adjustedIndex <- adjustedIndex + unit.Paths.Length
         | None ->
-            diagnostics.Add(Diagnostics.error "FSG0007" (sprintf "BeforeLastSourceFile placement for generated source '%s' could not be resolved because the project has no implementation source file." (hintList beforeLast)))
+            diagnostics.Add(
+                Diagnostics.error
+                    "FSG0007"
+                    (sprintf
+                        "BeforeLastSourceFile placement for generated source '%s' could not be resolved because the project has no implementation source file."
+                        (hintList beforeLast))
+            )
 
         match outputKind, endOfProject with
         | Application, _ :: _ ->
-            diagnostics.Add(Diagnostics.error "FSG0012" "EndOfProject placement is invalid for applications because it can break F# final-file rules.")
-        | _ ->
-            ordered <- ordered @ (endOfProject |> List.collect _.Paths)
+            diagnostics.Add(
+                Diagnostics.error
+                    "FSG0012"
+                    "EndOfProject placement is invalid for applications because it can break F# final-file rules."
+            )
+        | _ -> ordered <- ordered @ (endOfProject |> List.collect _.Paths)
 
         let mutable remaining = anchored
         let mutable progressed = true
@@ -371,6 +419,7 @@ module internal Placement =
                     match findPathIndex anchorPath ordered with
                     | Some index ->
                         let anchorKey = Path.GetFullPath(anchorPath)
+
                         let offset =
                             match afterFileOffsets.TryGetValue anchorKey with
                             | true, value -> value
@@ -388,8 +437,20 @@ module internal Placement =
             match unit.Placement with
             | BeforeFile anchorPath
             | AfterFile anchorPath ->
-                let id = if generatedPathSet.Contains(Path.GetFullPath(anchorPath)) then "FSG0009" else "FSG0007"
-                diagnostics.Add(Diagnostics.error id (sprintf "Generated source '%s' anchor '%s' could not be resolved." (hintList [ unit ]) anchorPath))
+                let id =
+                    if generatedPathSet.Contains(Path.GetFullPath(anchorPath)) then
+                        "FSG0009"
+                    else
+                        "FSG0007"
+
+                diagnostics.Add(
+                    Diagnostics.error
+                        id
+                        (sprintf
+                            "Generated source '%s' anchor '%s' could not be resolved."
+                            (hintList [ unit ])
+                            anchorPath)
+                )
             | _ -> ()
 
         ordered |> ImmutableArray.CreateRange, diagnostics |> Seq.toList

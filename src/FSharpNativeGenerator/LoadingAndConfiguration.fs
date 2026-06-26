@@ -8,10 +8,8 @@ open System.Reflection
 open System.Runtime.Loader
 
 type FSharpGeneratorAssemblyLoadResult =
-    {
-        Generators: ImmutableArray<IFSharpIncrementalGenerator>
-        Diagnostics: ImmutableArray<FSharpGeneratorDiagnostic>
-    }
+    { Generators: ImmutableArray<IFSharpIncrementalGenerator>
+      Diagnostics: ImmutableArray<FSharpGeneratorDiagnostic> }
 
 module FSharpGeneratorAssemblyLoader =
     let private error id message =
@@ -20,7 +18,9 @@ module FSharpGeneratorAssemblyLoader =
     type private GeneratorAssemblyLoadContext(generatorAssemblyPath: string) =
         inherit AssemblyLoadContext("FSharpGenerator:" + Path.GetFileName(generatorAssemblyPath), isCollectible = false)
 
-        let generatorDirectory = Path.GetDirectoryName(Path.GetFullPath(generatorAssemblyPath))
+        let generatorDirectory =
+            Path.GetDirectoryName(Path.GetFullPath(generatorAssemblyPath))
+
         let sharedAbstractionsAssembly = typeof<IFSharpIncrementalGenerator>.Assembly
         let generatorAssemblyName = Path.GetFileNameWithoutExtension(generatorAssemblyPath)
 
@@ -59,43 +59,72 @@ module FSharpGeneratorAssemblyLoader =
                 match FSharpGeneratorAttributeHelpers.tryGet candidate, hasInterface with
                 | Some generatorAttribute, true ->
                     if not (hasPublicVisibility candidate) then
-                        diagnostics.Add(error "FSG0002" (sprintf "Generator type '%s' must be public." candidate.FullName))
+                        diagnostics.Add(
+                            error "FSG0002" (sprintf "Generator type '%s' must be public." candidate.FullName)
+                        )
                     elif candidate.IsAbstract then
-                        diagnostics.Add(error "FSG0002" (sprintf "Generator type '%s' must not be abstract." candidate.FullName))
+                        diagnostics.Add(
+                            error "FSG0002" (sprintf "Generator type '%s' must not be abstract." candidate.FullName)
+                        )
                     elif not (FSharpGeneratorAttributeHelpers.isSupportedApiVersion generatorAttribute) then
-                        diagnostics.Add(error "FSG0015" (sprintf "Generator type '%s' references unsupported F# source-generation API version %d. Supported version is %d." candidate.FullName generatorAttribute.ApiVersion FSharpGeneratorApiVersion.Current))
+                        diagnostics.Add(
+                            error
+                                "FSG0015"
+                                (sprintf
+                                    "Generator type '%s' references unsupported F# source-generation API version %d. Supported version is %d."
+                                    candidate.FullName
+                                    generatorAttribute.ApiVersion
+                                    FSharpGeneratorApiVersion.Current)
+                        )
                     else
                         match candidate.GetConstructor(Type.EmptyTypes) with
                         | null ->
-                            diagnostics.Add(error "FSG0002" (sprintf "Generator type '%s' must have a public parameterless constructor." candidate.FullName))
+                            diagnostics.Add(
+                                error
+                                    "FSG0002"
+                                    (sprintf
+                                        "Generator type '%s' must have a public parameterless constructor."
+                                        candidate.FullName)
+                            )
                         | _ ->
                             try
                                 generators.Add(Activator.CreateInstance(candidate) :?> IFSharpIncrementalGenerator)
                             with ex ->
-                                diagnostics.Add(error "FSG0001" (sprintf "Generator type '%s' could not be created: %s" candidate.FullName ex.Message))
+                                diagnostics.Add(
+                                    error
+                                        "FSG0001"
+                                        (sprintf
+                                            "Generator type '%s' could not be created: %s"
+                                            candidate.FullName
+                                            ex.Message)
+                                )
                 | Some _, false
                 | None, true ->
-                    diagnostics.Add(error "FSG0002" (sprintf "Generator type '%s' must have both FSharpGeneratorAttribute and IFSharpIncrementalGenerator." candidate.FullName))
-                | None, false ->
-                    ()
+                    diagnostics.Add(
+                        error
+                            "FSG0002"
+                            (sprintf
+                                "Generator type '%s' must have both FSharpGeneratorAttribute and IFSharpIncrementalGenerator."
+                                candidate.FullName)
+                    )
+                | None, false -> ()
         with ex ->
-            diagnostics.Add({ error "FSG0001" (sprintf "Generator assembly load failed: %s" ex.Message) with FilePath = Some path })
+            diagnostics.Add(
+                { error "FSG0001" (sprintf "Generator assembly load failed: %s" ex.Message) with
+                    FilePath = Some path }
+            )
 
-        {
-            Generators = ImmutableArray.CreateRange generators
-            Diagnostics = ImmutableArray.CreateRange diagnostics
-        }
+        { Generators = ImmutableArray.CreateRange generators
+          Diagnostics = ImmutableArray.CreateRange diagnostics }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module FSharpSourceGeneratorConfiguration =
     let private error id message =
         FSharpGeneratorDiagnostic.create id message Error
 
-    let private normalizePath (path: string) =
-        Path.GetFullPath path
+    let private normalizePath (path: string) = Path.GetFullPath path
 
-    let private afterPrefix (prefix: string) (argument: string) =
-        argument.Substring(prefix.Length)
+    let private afterPrefix (prefix: string) (argument: string) = argument.Substring(prefix.Length)
 
     let private parseBoolSwitch (value: string) =
         match value with
@@ -115,58 +144,84 @@ module FSharpSourceGeneratorConfiguration =
         let additionalFilePaths = ResizeArray<string>()
         let analyzerConfigPaths = ResizeArray<string>()
         let remainingArguments = ResizeArray<string>()
-        let mutable emitGeneratedFiles = FSharpGeneratorDriverOptions.defaults.EmitGeneratedFiles
-        let mutable generatedFilesOutputPath = FSharpGeneratorDriverOptions.defaults.GeneratedFilesOutputPath
+
+        let mutable emitGeneratedFiles =
+            FSharpGeneratorDriverOptions.defaults.EmitGeneratedFiles
+
+        let mutable generatedFilesOutputPath =
+            FSharpGeneratorDriverOptions.defaults.GeneratedFilesOutputPath
+
         let mutable reportPath = FSharpGeneratorDriverOptions.defaults.ReportPath
 
         for argument in arguments do
             if argument.StartsWith("--fsharp-source-generator:", StringComparison.Ordinal) then
                 let value = afterPrefix "--fsharp-source-generator:" argument
-                if String.IsNullOrWhiteSpace value then addMissingValueDiagnostic diagnostics argument else generatorPaths.Add(normalizePath value)
+
+                if String.IsNullOrWhiteSpace value then
+                    addMissingValueDiagnostic diagnostics argument
+                else
+                    generatorPaths.Add(normalizePath value)
             elif argument.StartsWith("--fsharp-generator-additional-file:", StringComparison.Ordinal) then
                 let value = afterPrefix "--fsharp-generator-additional-file:" argument
-                if String.IsNullOrWhiteSpace value then addMissingValueDiagnostic diagnostics argument else additionalFilePaths.Add(normalizePath value)
+
+                if String.IsNullOrWhiteSpace value then
+                    addMissingValueDiagnostic diagnostics argument
+                else
+                    additionalFilePaths.Add(normalizePath value)
             elif argument.StartsWith("--fsharp-source-generator-analyzer-config:", StringComparison.Ordinal) then
                 let value = afterPrefix "--fsharp-source-generator-analyzer-config:" argument
-                if String.IsNullOrWhiteSpace value then addMissingValueDiagnostic diagnostics argument else analyzerConfigPaths.Add(normalizePath value)
+
+                if String.IsNullOrWhiteSpace value then
+                    addMissingValueDiagnostic diagnostics argument
+                else
+                    analyzerConfigPaths.Add(normalizePath value)
             elif argument.StartsWith("--fsharp-generated-files-output:", StringComparison.Ordinal) then
                 let value = afterPrefix "--fsharp-generated-files-output:" argument
-                if String.IsNullOrWhiteSpace value then addMissingValueDiagnostic diagnostics argument else generatedFilesOutputPath <- Some(normalizePath value)
+
+                if String.IsNullOrWhiteSpace value then
+                    addMissingValueDiagnostic diagnostics argument
+                else
+                    generatedFilesOutputPath <- Some(normalizePath value)
             elif argument.StartsWith("--fsharp-source-generator-report:", StringComparison.Ordinal) then
                 let value = afterPrefix "--fsharp-source-generator-report:" argument
-                if String.IsNullOrWhiteSpace value then addMissingValueDiagnostic diagnostics argument else reportPath <- Some(normalizePath value)
+
+                if String.IsNullOrWhiteSpace value then
+                    addMissingValueDiagnostic diagnostics argument
+                else
+                    reportPath <- Some(normalizePath value)
             elif argument.StartsWith("--emit-fsharp-generated-files", StringComparison.Ordinal) then
                 let value = afterPrefix "--emit-fsharp-generated-files" argument
 
                 match parseBoolSwitch value with
                 | Some parsed -> emitGeneratedFiles <- parsed
-                | None -> diagnostics.Add(error "FSG0011" (sprintf "Compiler option '%s' has an invalid boolean suffix." argument))
+                | None ->
+                    diagnostics.Add(
+                        error "FSG0011" (sprintf "Compiler option '%s' has an invalid boolean suffix." argument)
+                    )
             else
                 remainingArguments.Add argument
 
         let driverOptions =
-            {
-                FSharpGeneratorDriverOptions.defaults with
-                    EmitGeneratedFiles = emitGeneratedFiles
-                    GeneratedFilesOutputPath = generatedFilesOutputPath
-                    ReportPath = reportPath
-                    HostKind = CommandLine
-                    GeneratedRoot = defaultArg generatedFilesOutputPath FSharpGeneratorDriverOptions.defaults.GeneratedRoot
-            }
+            { FSharpGeneratorDriverOptions.defaults with
+                EmitGeneratedFiles = emitGeneratedFiles
+                GeneratedFilesOutputPath = generatedFilesOutputPath
+                ReportPath = reportPath
+                HostKind = CommandLine
+                GeneratedRoot = defaultArg generatedFilesOutputPath FSharpGeneratorDriverOptions.defaults.GeneratedRoot }
 
-        {
-            Configuration =
-                {
-                    GeneratorPaths = ImmutableArray.CreateRange generatorPaths
-                    AdditionalFilePaths = ImmutableArray.CreateRange additionalFilePaths
-                    AnalyzerConfigPaths = ImmutableArray.CreateRange analyzerConfigPaths
-                    DriverOptions = driverOptions
-                }
-            Diagnostics = ImmutableArray.CreateRange diagnostics
-            RemainingArguments = ImmutableArray.CreateRange remainingArguments
-        }
+        { Configuration =
+            { GeneratorPaths = ImmutableArray.CreateRange generatorPaths
+              AdditionalFilePaths = ImmutableArray.CreateRange additionalFilePaths
+              AnalyzerConfigPaths = ImmutableArray.CreateRange analyzerConfigPaths
+              DriverOptions = driverOptions }
+          Diagnostics = ImmutableArray.CreateRange diagnostics
+          RemainingArguments = ImmutableArray.CreateRange remainingArguments }
 
-    let fromMSBuildItems (generatorItems: seq<FSharpMSBuildSourceGeneratorItem>) (additionalFileItems: seq<FSharpMSBuildAdditionalFileItem>) (properties: FSharpMSBuildSourceGeneratorProperties) =
+    let fromMSBuildItems
+        (generatorItems: seq<FSharpMSBuildSourceGeneratorItem>)
+        (additionalFileItems: seq<FSharpMSBuildAdditionalFileItem>)
+        (properties: FSharpMSBuildSourceGeneratorProperties)
+        =
         let parseBoolOption (value: string option) =
             match value with
             | None -> None
@@ -182,32 +237,39 @@ module FSharpSourceGeneratorConfiguration =
             | Some value -> value
             | None ->
                 if properties.EmitFSharpGeneratedFiles.IsSome then
-                    diagnostics.Add(error "FSG0011" "MSBuild property EmitFSharpGeneratedFiles must be 'true' or 'false'.")
+                    diagnostics.Add(
+                        error "FSG0011" "MSBuild property EmitFSharpGeneratedFiles must be 'true' or 'false'."
+                    )
 
                 FSharpGeneratorDriverOptions.defaults.EmitGeneratedFiles
 
-        let outputPath = properties.FSharpGeneratedFilesOutputPath |> Option.map normalizePath
-        let reportPath = properties.FSharpSourceGeneratorReportPath |> Option.map normalizePath
+        let outputPath =
+            properties.FSharpGeneratedFilesOutputPath |> Option.map normalizePath
 
-        {
-            Configuration =
-                {
-                    GeneratorPaths = generatorItems |> Seq.map _.Include |> Seq.map normalizePath |> ImmutableArray.CreateRange
-                    AdditionalFilePaths = additionalFileItems |> Seq.map _.Include |> Seq.map normalizePath |> ImmutableArray.CreateRange
-                    AnalyzerConfigPaths = ImmutableArray<string>.Empty
-                    DriverOptions =
-                        {
-                            FSharpGeneratorDriverOptions.defaults with
-                                EmitGeneratedFiles = emitGeneratedFiles
-                                GeneratedFilesOutputPath = outputPath
-                                ReportPath = reportPath
-                                HostKind = MSBuild
-                                GeneratedRoot = defaultArg outputPath FSharpGeneratorDriverOptions.defaults.GeneratedRoot
-                        }
-                }
-            Diagnostics = ImmutableArray.CreateRange diagnostics
-            RemainingArguments = ImmutableArray<string>.Empty
-        }
+        let reportPath =
+            properties.FSharpSourceGeneratorReportPath |> Option.map normalizePath
+
+        { Configuration =
+            { GeneratorPaths =
+                generatorItems
+                |> Seq.map _.Include
+                |> Seq.map normalizePath
+                |> ImmutableArray.CreateRange
+              AdditionalFilePaths =
+                additionalFileItems
+                |> Seq.map _.Include
+                |> Seq.map normalizePath
+                |> ImmutableArray.CreateRange
+              AnalyzerConfigPaths = ImmutableArray<string>.Empty
+              DriverOptions =
+                { FSharpGeneratorDriverOptions.defaults with
+                    EmitGeneratedFiles = emitGeneratedFiles
+                    GeneratedFilesOutputPath = outputPath
+                    ReportPath = reportPath
+                    HostKind = MSBuild
+                    GeneratedRoot = defaultArg outputPath FSharpGeneratorDriverOptions.defaults.GeneratedRoot } }
+          Diagnostics = ImmutableArray.CreateRange diagnostics
+          RemainingArguments = ImmutableArray<string>.Empty }
 
     let additionalTextsWithDiagnostics (configuration: FSharpSourceGeneratorConfiguration) =
         let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
@@ -216,24 +278,25 @@ module FSharpSourceGeneratorConfiguration =
             configuration.AdditionalFilePaths
             |> Seq.map (fun path ->
                 if not (File.Exists path) then
-                    diagnostics.Add({ error "FSG0011" (sprintf "Additional file '%s' does not exist." path) with FilePath = Some path })
+                    diagnostics.Add(
+                        { error "FSG0011" (sprintf "Additional file '%s' does not exist." path) with
+                            FilePath = Some path }
+                    )
 
                 FSharpAdditionalText.fromFile path)
             |> ImmutableArray.CreateRange
 
-        {
-            AdditionalTexts = additionalTexts
-            Diagnostics = ImmutableArray.CreateRange diagnostics
-        }
+        { AdditionalTexts = additionalTexts
+          Diagnostics = ImmutableArray.CreateRange diagnostics }
 
     let additionalTexts (configuration: FSharpSourceGeneratorConfiguration) =
         (additionalTextsWithDiagnostics configuration).AdditionalTexts
 
     let private emptyAnalyzerConfigOptions =
-        {
-            GlobalOptions = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string>
-            GetOptionsForPath = fun _ -> Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string>
-        }
+        { GlobalOptions =
+            Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string>
+          GetOptionsForPath =
+            fun _ -> Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string> }
 
     let private trimSection (line: string) =
         line.Substring(1, line.Length - 2).Trim()
@@ -255,19 +318,20 @@ module FSharpSourceGeneratorConfiguration =
     let private sectionMatchesPath (section: string) (path: string) =
         let fileName = Path.GetFileName(path)
         let normalizedPath = Path.GetFullPath(path)
-        let normalizedSection = section.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar)
+
+        let normalizedSection =
+            section.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar)
 
         section = "*"
-        || (section.StartsWith("*.", StringComparison.Ordinal) && fileName.EndsWith(section.Substring(1), StringComparison.OrdinalIgnoreCase))
+        || (section.StartsWith("*.", StringComparison.Ordinal)
+            && fileName.EndsWith(section.Substring(1), StringComparison.OrdinalIgnoreCase))
         || fileName.Equals(section, StringComparison.OrdinalIgnoreCase)
         || normalizedPath.EndsWith(normalizedSection, StringComparison.OrdinalIgnoreCase)
 
     let analyzerConfigOptions (configuration: FSharpSourceGeneratorConfiguration) =
         if configuration.AnalyzerConfigPaths.IsDefaultOrEmpty then
-            {
-                Options = emptyAnalyzerConfigOptions
-                Diagnostics = ImmutableArray<FSharpGeneratorDiagnostic>.Empty
-            }
+            { Options = emptyAnalyzerConfigOptions
+              Diagnostics = ImmutableArray<FSharpGeneratorDiagnostic>.Empty }
         else
             let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
             let globalOptions = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -275,28 +339,42 @@ module FSharpSourceGeneratorConfiguration =
 
             for configPath in configuration.AnalyzerConfigPaths do
                 if not (File.Exists configPath) then
-                    diagnostics.Add({ error "FSG0011" (sprintf "Analyzer config file '%s' does not exist." configPath) with FilePath = Some configPath })
+                    diagnostics.Add(
+                        { error "FSG0011" (sprintf "Analyzer config file '%s' does not exist." configPath) with
+                            FilePath = Some configPath }
+                    )
                 else
                     let mutable currentSection: string option = None
 
                     for rawLine in File.ReadAllLines configPath do
                         let line = rawLine.Trim()
 
-                        if String.IsNullOrWhiteSpace line || line.StartsWith("#", StringComparison.Ordinal) || line.StartsWith(";", StringComparison.Ordinal) then
+                        if
+                            String.IsNullOrWhiteSpace line
+                            || line.StartsWith("#", StringComparison.Ordinal)
+                            || line.StartsWith(";", StringComparison.Ordinal)
+                        then
                             ()
-                        elif line.StartsWith("[", StringComparison.Ordinal) && line.EndsWith("]", StringComparison.Ordinal) then
+                        elif
+                            line.StartsWith("[", StringComparison.Ordinal)
+                            && line.EndsWith("]", StringComparison.Ordinal)
+                        then
                             currentSection <- Some(trimSection line)
                         else
                             match tryKeyValue line with
                             | None ->
-                                diagnostics.Add({ error "FSG0011" (sprintf "Invalid analyzer config line '%s'." rawLine) with FilePath = Some configPath })
+                                diagnostics.Add(
+                                    { error "FSG0011" (sprintf "Invalid analyzer config line '%s'." rawLine) with
+                                        FilePath = Some configPath }
+                                )
                             | Some(key, value) ->
                                 match currentSection with
                                 | None -> globalOptions[key] <- value
                                 | Some section ->
                                     let existing =
                                         sectionOptions
-                                        |> Seq.tryFind (fun (candidate, _) -> candidate.Equals(section, StringComparison.OrdinalIgnoreCase))
+                                        |> Seq.tryFind (fun (candidate, _) ->
+                                            candidate.Equals(section, StringComparison.OrdinalIgnoreCase))
 
                                     let values =
                                         match existing with
@@ -309,7 +387,8 @@ module FSharpSourceGeneratorConfiguration =
                                     values[key] <- value
 
             let optionsForPath path =
-                let merged = Dictionary<string, string>(globalOptions, StringComparer.OrdinalIgnoreCase)
+                let merged =
+                    Dictionary<string, string>(globalOptions, StringComparer.OrdinalIgnoreCase)
 
                 for section, options in sectionOptions do
                     if sectionMatchesPath section path then
@@ -318,14 +397,10 @@ module FSharpSourceGeneratorConfiguration =
 
                 merged :> IReadOnlyDictionary<string, string>
 
-            {
-                Options =
-                    {
-                        GlobalOptions = globalOptions :> IReadOnlyDictionary<string, string>
-                        GetOptionsForPath = optionsForPath
-                    }
-                Diagnostics = ImmutableArray.CreateRange diagnostics
-            }
+            { Options =
+                { GlobalOptions = globalOptions :> IReadOnlyDictionary<string, string>
+                  GetOptionsForPath = optionsForPath }
+              Diagnostics = ImmutableArray.CreateRange diagnostics }
 
     let loadGenerators (configuration: FSharpSourceGeneratorConfiguration) =
         let loadResults =
@@ -333,13 +408,12 @@ module FSharpSourceGeneratorConfiguration =
             |> Seq.map FSharpGeneratorAssemblyLoader.loadFromPath
             |> Seq.toList
 
-        {
-            Generators = loadResults |> Seq.collect _.Generators |> ImmutableArray.CreateRange
-            Diagnostics = loadResults |> Seq.collect _.Diagnostics |> ImmutableArray.CreateRange
-        }
+        { Generators = loadResults |> Seq.collect _.Generators |> ImmutableArray.CreateRange
+          Diagnostics = loadResults |> Seq.collect _.Diagnostics |> ImmutableArray.CreateRange }
 
     let generatorPathsFromNuGetPackage packageRoot =
-        let analyzerRoot = Path.Combine(Path.GetFullPath(packageRoot), "analyzers", "dotnet", "fs")
+        let analyzerRoot =
+            Path.Combine(Path.GetFullPath(packageRoot), "analyzers", "dotnet", "fs")
 
         if Directory.Exists analyzerRoot then
             Directory.EnumerateFiles(analyzerRoot, "*.dll", SearchOption.AllDirectories)
@@ -352,18 +426,19 @@ module FSharpSourceGeneratorConfiguration =
         let generatorPaths = generatorPathsFromNuGetPackage packageRoot
 
         if generatorPaths.IsDefaultOrEmpty then
-            {
-                Generators = ImmutableArray<IFSharpIncrementalGenerator>.Empty
-                Diagnostics =
-                    ImmutableArray.Create(
-                        { error "FSG0001" (sprintf "NuGet analyzer folder '%s' does not contain F# generator assemblies." (Path.Combine(Path.GetFullPath(packageRoot), "analyzers", "dotnet", "fs"))) with
-                            FilePath = Some(Path.GetFullPath(packageRoot)) })
-            }
+            { Generators = ImmutableArray<IFSharpIncrementalGenerator>.Empty
+              Diagnostics =
+                ImmutableArray.Create(
+                    { error
+                          "FSG0001"
+                          (sprintf
+                              "NuGet analyzer folder '%s' does not contain F# generator assemblies."
+                              (Path.Combine(Path.GetFullPath(packageRoot), "analyzers", "dotnet", "fs"))) with
+                        FilePath = Some(Path.GetFullPath(packageRoot)) }
+                ) }
         else
             loadGenerators
-                {
-                    GeneratorPaths = generatorPaths
-                    AdditionalFilePaths = ImmutableArray<string>.Empty
-                    AnalyzerConfigPaths = ImmutableArray<string>.Empty
-                    DriverOptions = FSharpGeneratorDriverOptions.defaults
-                }
+                { GeneratorPaths = generatorPaths
+                  AdditionalFilePaths = ImmutableArray<string>.Empty
+                  AnalyzerConfigPaths = ImmutableArray<string>.Empty
+                  DriverOptions = FSharpGeneratorDriverOptions.defaults }

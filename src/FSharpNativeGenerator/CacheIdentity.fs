@@ -12,7 +12,11 @@ module internal CacheIdentityParts =
         values
         |> Seq.map (fun pair -> pair.Key, pair.Value)
         |> Seq.sortBy fst
-        |> Seq.collect (fun (key, value) -> seq { key; value })
+        |> Seq.collect (fun (key, value) ->
+            seq {
+                key
+                value
+            })
 
     let additionalTextChecksumParts (additionalText: FSharpAdditionalText) (cancellationToken: CancellationToken) =
         seq {
@@ -49,11 +53,17 @@ module FSharpProjectCacheIdentity =
 
             for sourceFile in snapshot.SourceFiles do
                 yield sourceFile.Path
-                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath sourceFile.Path |> CacheIdentityParts.dictionaryParts
+
+                yield!
+                    snapshot.AnalyzerConfigOptions.GetOptionsForPath sourceFile.Path
+                    |> CacheIdentityParts.dictionaryParts
 
             for additionalText in snapshot.AdditionalTexts do
                 yield additionalText.Path
-                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath additionalText.Path |> CacheIdentityParts.dictionaryParts
+
+                yield!
+                    snapshot.AnalyzerConfigOptions.GetOptionsForPath additionalText.Path
+                    |> CacheIdentityParts.dictionaryParts
 
             for generatedSource in generatedSources do
                 yield generatedSource.ResolvedPath
@@ -67,9 +77,7 @@ module internal FSharpGeneratorDriverIdentity =
         if String.IsNullOrWhiteSpace location || not (File.Exists location) then
             "<missing>"
         else
-            File.ReadAllBytes location
-            |> SHA256.HashData
-            |> Convert.ToHexString
+            File.ReadAllBytes location |> SHA256.HashData |> Convert.ToHexString
 
     let compute (generators: ImmutableArray<IFSharpIncrementalGenerator>) (options: FSharpGeneratorDriverOptions) =
         seq {
@@ -82,6 +90,7 @@ module internal FSharpGeneratorDriverIdentity =
 
             for generator in generators do
                 let generatorType = generator.GetType()
+
                 let apiVersion =
                     FSharpGeneratorAttributeHelpers.tryGet generatorType
                     |> Option.map _.ApiVersion
@@ -96,7 +105,12 @@ module internal FSharpGeneratorDriverIdentity =
         |> Hashing.sha256Many
 
 module internal FSharpGeneratorRunCacheKey =
-    let compute (generators: ImmutableArray<IFSharpIncrementalGenerator>) (options: FSharpGeneratorDriverOptions) (snapshot: FSharpGeneratorProjectSnapshot) (cancellationToken: CancellationToken) =
+    let compute
+        (generators: ImmutableArray<IFSharpIncrementalGenerator>)
+        (options: FSharpGeneratorDriverOptions)
+        (snapshot: FSharpGeneratorProjectSnapshot)
+        (cancellationToken: CancellationToken)
+        =
         seq {
             yield Hashing.toHex (FSharpGeneratorDriverIdentity.compute generators options)
             yield snapshot.ProjectOptions.ProjectFilePath
@@ -118,10 +132,16 @@ module internal FSharpGeneratorRunCacheKey =
 
             for sourceFile in snapshot.SourceFiles do
                 yield sourceFile.Path
-                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath sourceFile.Path |> CacheIdentityParts.dictionaryParts
+
+                yield!
+                    snapshot.AnalyzerConfigOptions.GetOptionsForPath sourceFile.Path
+                    |> CacheIdentityParts.dictionaryParts
 
             for additionalText in snapshot.AdditionalTexts do
                 yield additionalText.Path
-                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath additionalText.Path |> CacheIdentityParts.dictionaryParts
+
+                yield!
+                    snapshot.AnalyzerConfigOptions.GetOptionsForPath additionalText.Path
+                    |> CacheIdentityParts.dictionaryParts
         }
         |> Hashing.sha256Many

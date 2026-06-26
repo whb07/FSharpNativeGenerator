@@ -17,7 +17,12 @@ type CliHarnessGenerator() =
             context.RegisterSourceOutput(
                 moduleNameProvider,
                 Action<FSharpSourceProductionContext, string>(fun productionContext moduleName ->
-                    productionContext.AddImplementationSource(moduleName, FSharpSourceText.OfString("module " + moduleName + "\nlet answer = 42"), Prelude)))
+                    productionContext.AddImplementationSource(
+                        moduleName,
+                        FSharpSourceText.OfString("module " + moduleName + "\nlet answer = 42"),
+                        Prelude
+                    ))
+            )
 
 [<FSharpGenerator>]
 type CliSourceTextGenerator() =
@@ -34,4 +39,9 @@ type CliSourceTextGenerator() =
             context.RegisterSourceOutput(
                 markedSourceFiles,
                 Action<FSharpSourceProductionContext, string>(fun productionContext moduleName ->
-                    productionContext.AddImplementationSource(moduleName, FSharpSourceText.OfString("module " + moduleName + "\nlet value = 1"), Prelude)))
+                    productionContext.AddImplementationSource(
+                        moduleName,
+                        FSharpSourceText.OfString("module " + moduleName + "\nlet value = 1"),
+                        Prelude
+                    ))
+            )
