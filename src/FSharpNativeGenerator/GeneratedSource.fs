@@ -7,6 +7,8 @@ open System.IO
 open System.Text
 open System.Text.Json
 open System.Text.RegularExpressions
+open FSharp.Compiler.CodeAnalysis
+open FSharp.Compiler.Text
 
 module internal GeneratedPaths =
     let private invalidChars =
@@ -94,6 +96,8 @@ module internal RunReport =
         File.WriteAllText(path, json, Encoding.UTF8)
 
 module internal GeneratedSourceValidation =
+    let private checker = lazy (FSharpChecker.Create())
+
     let private hasExplicitModuleOrNamespace (sourceText: FSharpSourceText) =
         sourceText.Text.Split([| "\r\n"; "\n" |], StringSplitOptions.None)
         |> Seq.map _.Trim()
@@ -101,7 +105,89 @@ module internal GeneratedSourceValidation =
             line.StartsWith("module ", StringComparison.Ordinal)
             || line.StartsWith("namespace ", StringComparison.Ordinal))
 
-    let validate (source: FSharpGeneratedSource) =
+    let private tryPrefixedValue (prefix: string) (value: string) =
+        if value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) then
+            let suffix = value.Substring(prefix.Length)
+
+            if String.IsNullOrWhiteSpace suffix then
+                None
+            else
+                Some suffix
+        else
+            None
+
+    let private parseOptionValues (names: Set<string>) (prefixes: string list) (otherOptions: ImmutableArray<string>) =
+        let rec loop (remainingOptions: string list) values =
+            match remainingOptions with
+            | [] -> List.rev values
+            | option :: value :: tail when names.Contains(option.ToUpperInvariant()) && not (String.IsNullOrWhiteSpace value) ->
+                loop tail (value :: values)
+            | option :: tail ->
+                let prefixedValue =
+                    prefixes
+                    |> List.tryPick (fun prefix -> tryPrefixedValue prefix option)
+
+                match prefixedValue with
+                | Some value -> loop tail (value :: values)
+                | None -> loop tail values
+
+        loop (otherOptions |> Seq.toList) []
+
+    let private conditionalDefines (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions) =
+        let values =
+            parseOptionValues (set [ "--DEFINE"; "-D" ]) [ "--define:"; "-d:" ] projectOptions.OtherOptions
+
+        values
+        |> List.collect (fun value ->
+            value.Split([| ';'; ',' |], StringSplitOptions.RemoveEmptyEntries ||| StringSplitOptions.TrimEntries)
+            |> Array.toList)
+
+    let private languageVersion (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions) =
+        parseOptionValues (set [ "--LANGVERSION" ]) [ "--langversion:" ] projectOptions.OtherOptions
+        |> List.tryLast
+
+    let private parsingOptions (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions) (sourcePath: string) =
+        {
+            FSharpParsingOptions.Default with
+                SourceFiles = [| sourcePath |]
+                ConditionalDefines = conditionalDefines projectOptions
+                LangVersionText = languageVersion projectOptions |> Option.defaultValue FSharpParsingOptions.Default.LangVersionText
+                IsExe = projectOptions.OutputKind = Application
+        }
+
+    let private diagnosticSeverity (severity: FSharp.Compiler.Diagnostics.FSharpDiagnosticSeverity) =
+        match severity with
+        | FSharp.Compiler.Diagnostics.FSharpDiagnosticSeverity.Error -> Error
+        | FSharp.Compiler.Diagnostics.FSharpDiagnosticSeverity.Warning -> Warning
+        | _ -> Info
+
+    let private diagnosticRange (diagnostic: FSharp.Compiler.Diagnostics.FSharpDiagnostic) =
+        Some
+            {
+                FilePath = diagnostic.FileName
+                StartLine = diagnostic.StartLine
+                StartColumn = diagnostic.StartColumn
+                EndLine = diagnostic.EndLine
+                EndColumn = diagnostic.EndColumn
+            }
+
+    let private parseDiagnostics (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions) (source: FSharpGeneratedSource) =
+        let sourceText = SourceText.ofString source.SourceText.Text
+        let parseOptions = parsingOptions projectOptions source.ResolvedPath
+
+        checker.Value.ParseFile(source.ResolvedPath, sourceText, parseOptions)
+        |> Async.RunSynchronously
+        |> _.Diagnostics
+        |> Seq.map (fun diagnostic ->
+            {
+                Id = "FSG0005"
+                Message = sprintf "Generated source '%s' parse failed: %s" source.HintName diagnostic.Message
+                Severity = diagnosticSeverity diagnostic.Severity
+                Range = diagnosticRange diagnostic
+                FilePath = Some source.ResolvedPath
+            })
+
+    let validate (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions) (source: FSharpGeneratedSource) =
         seq {
             if String.IsNullOrWhiteSpace source.SourceText.Text then
                 yield
@@ -112,6 +198,8 @@ module internal GeneratedSourceValidation =
                 yield
                     Diagnostics.error "FSG0005" (sprintf "Generated source '%s' must include an explicit module or namespace declaration." source.HintName)
                     |> Diagnostics.withPath source.ResolvedPath
+            else
+                yield! parseDiagnostics projectOptions source
         }
 
 module internal Placement =

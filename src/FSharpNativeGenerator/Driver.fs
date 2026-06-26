@@ -248,7 +248,7 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
 
             diagnostics.AddRange postInitializationMaterializeDiagnostics
 
-            for diagnostic in postInitializationMaterialized |> Seq.collect GeneratedSourceValidation.validate do
+            for diagnostic in postInitializationMaterialized |> Seq.collect (GeneratedSourceValidation.validate projectSnapshot.ProjectOptions) do
                 diagnostics.Add diagnostic
 
             let sourceOutputSnapshot =
@@ -300,7 +300,7 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
             diagnostics.AddRange materializeDiagnostics
 
             if not skipFinalMaterialization then
-                for diagnostic in materialized |> Seq.collect GeneratedSourceValidation.validate do
+                for diagnostic in materialized |> Seq.collect (GeneratedSourceValidation.validate projectSnapshot.ProjectOptions) do
                     diagnostics.Add diagnostic
 
             let originalSourcePathSet =

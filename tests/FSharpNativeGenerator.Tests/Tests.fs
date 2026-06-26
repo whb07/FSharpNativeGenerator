@@ -899,6 +899,39 @@ let ``generated source without module or namespace is rejected`` () =
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
+let ``generated source syntax errors are reported with generated file path`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let result = snapshot Library [ domain ] |> runWith options (InvalidSourceGenerator("BrokenSyntax", "module BrokenSyntax\nlet value ="))
+
+    let parseDiagnostics =
+        result.Diagnostics
+        |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0005" && diagnostic.Message.Contains("parse failed", StringComparison.OrdinalIgnoreCase))
+        |> Seq.toArray
+    let generatedFilePath = generatedPath options.GeneratedRoot typeof<InvalidSourceGenerator> Implementation "BrokenSyntax"
+
+    Assert.NotEmpty(parseDiagnostics)
+    Assert.All(parseDiagnostics, fun diagnostic ->
+        Assert.Equal(Some generatedFilePath, diagnostic.FilePath)
+        Assert.True(diagnostic.Range.IsSome))
+    Assert.Empty(result.GeneratedSources)
+
+[<Fact>]
+let ``generated source parser observes project conditional defines`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let project = snapshotWithOtherOptions Library [ domain ] [ "--define:GENERATED_OK" ]
+    let source =
+        "module ConditionalGenerated\n#if GENERATED_OK\nlet value = 1\n#else\nlet value =\n#endif"
+
+    let result = project |> runWith options (InvalidSourceGenerator("ConditionalGenerated", source))
+
+    Assert.Empty(result.Diagnostics)
+    Assert.Single(result.GeneratedSources) |> ignore
+
+[<Fact>]
 let ``source snapshot count mismatch fails generation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"

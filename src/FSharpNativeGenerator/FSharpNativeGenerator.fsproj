@@ -17,4 +17,8 @@
     <Compile Include="Driver.fs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="FSharp.Compiler.Service" Version="43.11.301" />
+  </ItemGroup>
+
 </Project>
