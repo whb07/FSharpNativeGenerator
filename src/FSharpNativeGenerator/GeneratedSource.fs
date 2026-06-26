@@ -7,6 +7,7 @@ open System.IO
 open System.Text
 open System.Text.Json
 open System.Text.RegularExpressions
+open System.Threading
 open FSharp.Compiler.CodeAnalysis
 open FSharp.Compiler.Text
 
@@ -184,7 +185,10 @@ module internal GeneratedSourceValidation =
     let private parseDiagnostics
         (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions)
         (source: FSharpGeneratedSource)
+        (cancellationToken: CancellationToken)
         =
+        cancellationToken.ThrowIfCancellationRequested()
+
         let sourceText = SourceText.ofString source.SourceText.Text
         let parseOptions = parsingOptions projectOptions source.ResolvedPath
 
@@ -204,8 +208,11 @@ module internal GeneratedSourceValidation =
     let validate
         (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions)
         (source: FSharpGeneratedSource)
+        (cancellationToken: CancellationToken)
         =
         seq {
+            cancellationToken.ThrowIfCancellationRequested()
+
             if String.IsNullOrWhiteSpace source.SourceText.Text then
                 yield
                     Diagnostics.error "FSG0005" (sprintf "Generated source '%s' is empty." source.HintName)
@@ -220,7 +227,7 @@ module internal GeneratedSourceValidation =
                             source.HintName)
                     |> Diagnostics.withPath source.ResolvedPath
             else
-                yield! parseDiagnostics projectOptions source
+                yield! parseDiagnostics projectOptions source cancellationToken
         }
 
 module internal Placement =

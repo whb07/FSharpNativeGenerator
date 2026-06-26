@@ -577,6 +577,22 @@ type CancellationThrowingGenerator() =
             )
 
 [<FSharpGenerator>]
+type ValidationCancellingGenerator(cancellationTokenSource: CancellationTokenSource) =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    productionContext.AddImplementationSource(
+                        "CancelDuringValidation",
+                        text "module CancelDuringValidation",
+                        Prelude
+                    )
+
+                    cancellationTokenSource.Cancel())
+            )
+
+[<FSharpGenerator>]
 type SameHintGeneratorA() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
@@ -2092,6 +2108,23 @@ let ``cancelled token before generator run is observed`` () =
 
     let driver =
         FSharpGeneratorDriver.Create([ ImplementationGenerator("Generated", Prelude) ], options)
+
+    Assert.Throws<OperationCanceledException>(fun () ->
+        driver.RunGenerators(snapshot Library [ domain ], cts.Token) |> ignore)
+
+[<Fact>]
+let ``cancellation during generated source validation is observed`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    use cts = new CancellationTokenSource()
+
+    let driver =
+        FSharpGeneratorDriver.Create([ ValidationCancellingGenerator(cts) ], options)
 
     Assert.Throws<OperationCanceledException>(fun () ->
         driver.RunGenerators(snapshot Library [ domain ], cts.Token) |> ignore)

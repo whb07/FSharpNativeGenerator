@@ -361,7 +361,8 @@ type FSharpGeneratorDriver
 
             for diagnostic in
                 postInitializationMaterialized
-                |> Seq.collect (GeneratedSourceValidation.validate projectSnapshot.ProjectOptions) do
+                |> Seq.collect (fun source ->
+                    GeneratedSourceValidation.validate projectSnapshot.ProjectOptions source cancellationToken) do
                 diagnostics.Add diagnostic
 
             let sourceOutputSnapshot =
@@ -429,7 +430,8 @@ type FSharpGeneratorDriver
             if not skipFinalMaterialization then
                 for diagnostic in
                     materialized
-                    |> Seq.collect (GeneratedSourceValidation.validate projectSnapshot.ProjectOptions) do
+                    |> Seq.collect (fun source ->
+                        GeneratedSourceValidation.validate projectSnapshot.ProjectOptions source cancellationToken) do
                     diagnostics.Add diagnostic
 
             let originalSourcePathSet =
