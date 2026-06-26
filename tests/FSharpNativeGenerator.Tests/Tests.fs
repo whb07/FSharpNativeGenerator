@@ -144,6 +144,62 @@ let private writeFSharpProject projectPath sourceFiles =
 </Project>
 """)
 
+let private writeGeneratorProject projectDirectory assemblyName =
+    Directory.CreateDirectory(projectDirectory) |> ignore
+
+    let projectPath = Path.Combine(projectDirectory, assemblyName + ".fsproj")
+    let sourcePath = Path.Combine(projectDirectory, "Library.fs")
+
+    let sourceGeneratorProjectPath =
+        Path.Combine(repoRoot (), "src/FSharpNativeGenerator/FSharpNativeGenerator.fsproj")
+        |> Path.GetFullPath
+
+    let source =
+        [ "namespace SharedGenerator"
+          ""
+          "open System"
+          "open FSharp.Compiler.SourceGeneration"
+          ""
+          "[<FSharpGenerator>]"
+          "type CommonGenerator() ="
+          "    interface IFSharpIncrementalGenerator with"
+          "        member _.Initialize context ="
+          "            context.RegisterSourceOutput("
+          "                context.ProjectOptionsProvider,"
+          "                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->"
+          "                    productionContext.AddImplementationSource(\"SharedHint\", FSharpSourceText.OfString \"module SharedOutput\", Prelude)))" ]
+        |> String.concat Environment.NewLine
+
+    let project =
+        [ "<Project Sdk=\"Microsoft.NET.Sdk\">"
+          "  <PropertyGroup>"
+          "    <TargetFramework>net10.0</TargetFramework>"
+          sprintf "    <AssemblyName>%s</AssemblyName>" assemblyName
+          "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>"
+          "    <EnableNETAnalyzers>true</EnableNETAnalyzers>"
+          "    <AnalysisMode>All</AnalysisMode>"
+          "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>"
+          "  </PropertyGroup>"
+          "  <ItemGroup>"
+          "    <Compile Include=\"Library.fs\" />"
+          "  </ItemGroup>"
+          "  <ItemGroup>"
+          sprintf "    <ProjectReference Include=\"%s\" />" sourceGeneratorProjectPath
+          "  </ItemGroup>"
+          "</Project>" ]
+        |> String.concat Environment.NewLine
+
+    writeFile sourcePath source
+    writeFile projectPath project
+
+    let exitCode, output = runDotnetBuild projectPath
+
+    if exitCode <> 0 then
+        failwith output
+
+    Path.Combine(projectDirectory, "bin", "Debug", "net10.0", assemblyName + ".dll")
+    |> Path.GetFullPath
+
 let private runWith options generator snapshot =
     let driver = FSharpGeneratorDriver.Create([ generator ], options)
     driver.RunGenerators(snapshot, CancellationToken.None) |> snd
@@ -157,7 +213,21 @@ let private generatedPath root (generatorType: Type) kind hint =
         | Implementation -> ".fs"
         | Signature -> ".fsi"
 
-    Path.Combine(root, generatorType.FullName, hint + extension) |> Path.GetFullPath
+    let generatorIdentity =
+        let assemblyName = generatorType.Assembly.GetName().Name
+
+        let typeName =
+            if String.IsNullOrWhiteSpace generatorType.FullName then
+                generatorType.Name
+            else
+                generatorType.FullName
+
+        if String.IsNullOrWhiteSpace assemblyName then
+            typeName
+        else
+            assemblyName + "." + typeName
+
+    Path.Combine(root, generatorIdentity, hint + extension) |> Path.GetFullPath
 
 [<FSharpGenerator>]
 type ImplementationGenerator(hintName: string, placement: FSharpGeneratedSourcePlacement) =
@@ -1731,6 +1801,51 @@ let ``same hint names across different generators remain path unique`` () =
     Assert.Empty(result.Diagnostics)
     Assert.Equal(2, result.GeneratedSources.Length)
     Assert.NotEqual<string>(result.GeneratedSources.[0].ResolvedPath, result.GeneratedSources.[1].ResolvedPath)
+
+[<Fact>]
+let ``same generator type name from different assemblies remains path unique`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+
+    let generatorA =
+        writeGeneratorProject (fileIn root "GeneratorA") "DuplicateGeneratorA"
+
+    let generatorB =
+        writeGeneratorProject (fileIn root "GeneratorB") "DuplicateGeneratorB"
+
+    let loadA = FSharpGeneratorAssemblyLoader.loadFromPath generatorA
+    let loadB = FSharpGeneratorAssemblyLoader.loadFromPath generatorB
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let generators =
+        Seq.append loadA.Generators loadB.Generators |> ImmutableArray.CreateRange
+
+    let driver = FSharpGeneratorDriver.Create(generators, options)
+
+    let _, result =
+        driver.RunGenerators(snapshot Library [ domain ], CancellationToken.None)
+
+    let generatedPaths =
+        result.GeneratedSources |> Seq.map _.ResolvedPath |> Seq.toArray
+
+    Assert.Empty(loadA.Diagnostics)
+    Assert.Empty(loadB.Diagnostics)
+    Assert.Empty(result.Diagnostics)
+    Assert.Equal(2, result.GeneratedSources.Length)
+    Assert.Equal(2, generatedPaths |> Seq.distinct |> Seq.length)
+
+    Assert.Contains(
+        result.GeneratedSources,
+        fun source -> source.GeneratorName = "DuplicateGeneratorA.SharedGenerator.CommonGenerator"
+    )
+
+    Assert.Contains(
+        result.GeneratedSources,
+        fun source -> source.GeneratorName = "DuplicateGeneratorB.SharedGenerator.CommonGenerator"
+    )
 
 [<Fact>]
 let ``source file order change updates project cache identity`` () =

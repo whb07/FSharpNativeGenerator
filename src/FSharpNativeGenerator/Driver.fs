@@ -62,6 +62,21 @@ module private ProjectOutputPath =
         |> loop
         |> Option.map (normalize projectOptions)
 
+module private GeneratorIdentity =
+    let create (generatorType: Type) =
+        let assemblyName = generatorType.Assembly.GetName().Name
+
+        let typeName =
+            if String.IsNullOrWhiteSpace generatorType.FullName then
+                generatorType.Name
+            else
+                generatorType.FullName
+
+        if String.IsNullOrWhiteSpace assemblyName then
+            typeName
+        else
+            assemblyName + "." + typeName
+
 type FSharpGeneratorDriver
     private
     (
@@ -83,7 +98,7 @@ type FSharpGeneratorDriver
                 generators
                 |> Seq.map (fun generator ->
                     let generatorType = generator.GetType()
-                    let generatorName = generatorType.FullName
+                    let generatorName = GeneratorIdentity.create generatorType
                     let postInitOutputs = ResizeArray<Action<FSharpPostInitializationContext>>()
                     let sourceOutputs = ResizeArray<RegisteredSourceOutput>()
                     let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
