@@ -874,7 +874,7 @@ let ``generator assembly content change invalidates cached result`` () =
     let _, second = updatedDriver.RunGenerators(project, CancellationToken.None)
 
     Assert.Empty(loadResult.Diagnostics)
-    Assert.Single(loadResult.Generators) |> ignore
+    Assert.Contains(loadResult.Generators, fun generator -> generator.GetType().FullName = "FSharpNativeGenerator.TestGenerators.CliHarnessGenerator")
     Assert.False(first.CacheHit)
     Assert.False(second.CacheHit)
 
@@ -1292,7 +1292,7 @@ let ``MSBuild source generator item loads generator assembly`` () =
 
     Assert.Empty(result.Diagnostics)
     Assert.Empty(loadResult.Diagnostics)
-    Assert.Single(loadResult.Generators) |> ignore
+    Assert.Contains(loadResult.Generators, fun generator -> generator.GetType().FullName = "FSharpNativeGenerator.TestGenerators.CliHarnessGenerator")
 
 [<Fact>]
 let ``MSBuild configuration reports invalid boolean property`` () =
@@ -1418,7 +1418,7 @@ let ``NuGet analyzer folder generator loads from analyzers dotnet fs`` () =
 
     Assert.Equal<string array>([| packagedGeneratorAssembly |], generatorPaths |> Seq.toArray)
     Assert.Empty(loadResult.Diagnostics)
-    Assert.Single(loadResult.Generators) |> ignore
+    Assert.Contains(loadResult.Generators, fun generator -> generator.GetType().FullName = "FSharpNativeGenerator.TestGenerators.CliHarnessGenerator")
 
 [<Fact>]
 let ``NuGet analyzer folder loading reports missing fs analyzer folder`` () =
@@ -1477,6 +1477,75 @@ let ``CLI runs generators without MSBuild and prints updated source list`` () =
 
     Assert.Contains(generatedPath, output)
     Assert.True(File.Exists(generatedPath), generatedPath)
+
+[<Fact>]
+let ``CLI passes real source text snapshots to loaded generators`` () =
+    let root = tempRoot ()
+    let consumer = fileIn root "Consumer.fs"
+    let generatedOutput = fileIn root "generated"
+    let reportPath = fileIn root "report.json"
+    let repositoryRoot = repoRoot ()
+    let cliProject = Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj") |> Path.GetFullPath
+    let generatorAssembly =
+        Path.Combine(repositoryRoot, "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        |> Path.GetFullPath
+
+    writeFile consumer "module Consumer\n// SOURCE_TEXT_MARKER\nlet value = GeneratedPrelude.answer"
+
+    let arguments =
+        String.concat
+            " "
+            [
+                "run"
+                "--project"
+                "\"" + cliProject + "\""
+                "--"
+                "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
+                "--emit-fsharp-generated-files+"
+                "--fsharp-generated-files-output:" + "\"" + generatedOutput + "\""
+                "--fsharp-source-generator-report:" + "\"" + reportPath + "\""
+                "\"" + consumer + "\""
+            ]
+
+    let exitCode, output, error = runProcess "dotnet" arguments root
+
+    if exitCode <> 0 then
+        failwith (output + error)
+
+    use report = JsonDocument.Parse(File.ReadAllText(reportPath))
+    let generatedSources = report.RootElement.GetProperty("GeneratedSources")
+
+    Assert.True(generatedSources.EnumerateArray() |> Seq.exists (fun item -> item.GetProperty("HintName").GetString() = "SawRealSourceText"))
+
+[<Fact>]
+let ``CLI reports missing source files`` () =
+    let root = tempRoot ()
+    let missing = fileIn root "Missing.fs"
+    let repositoryRoot = repoRoot ()
+    let cliProject = Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj") |> Path.GetFullPath
+    let generatorAssembly =
+        Path.Combine(repositoryRoot, "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        |> Path.GetFullPath
+
+    Directory.CreateDirectory(root) |> ignore
+
+    let arguments =
+        String.concat
+            " "
+            [
+                "run"
+                "--project"
+                "\"" + cliProject + "\""
+                "--"
+                "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
+                "\"" + missing + "\""
+            ]
+
+    let exitCode, _, error = runProcess "dotnet" arguments root
+
+    Assert.Equal(1, exitCode)
+    Assert.Contains("FSG0011", error)
+    Assert.Contains(missing, error)
 
 [<Fact>]
 let ``CLI passes analyzer config options to loaded generators`` () =

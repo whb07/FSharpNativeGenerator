@@ -30,21 +30,6 @@ Generator options:
         else
             Library
 
-    let private sourceSnapshot path =
-        let fullPath = Path.GetFullPath(path)
-
-        if File.Exists fullPath then
-            FSharpSourceFileSnapshot.create fullPath (File.ReadAllText fullPath)
-        else
-            let emptyText = FSharpSourceText.OfString ""
-
-            {
-                Path = fullPath
-                SourceText = emptyText
-                Checksum = FSharpSourceText.checksum emptyText
-                IsSignatureFile = fullPath.EndsWith(".fsi", StringComparison.OrdinalIgnoreCase)
-            }
-
     let private printDiagnostic (diagnostic: FSharpGeneratorDiagnostic) =
         let location = diagnostic.FilePath |> Option.defaultValue ""
         eprintfn "%s %A %s %s" diagnostic.Id diagnostic.Severity location diagnostic.Message
@@ -90,23 +75,33 @@ Generator options:
                         Stamp = None
                     }
 
-                let snapshot =
-                    {
-                        ProjectOptions = projectOptions
-                        SourceFiles = sourceFiles |> Seq.map sourceSnapshot |> ImmutableArray.CreateRange
-                        AdditionalTexts = additionalTextsResult.AdditionalTexts
-                        AnalyzerConfigOptions = analyzerConfigResult.Options
-                    }
+                let sourceFilesResult =
+                    FSharpSourceFileSnapshot.loadProjectSourceFiles
+                        projectOptions
+                        (fun _ -> None)
+                        CancellationToken.None
 
-                let driver = FSharpGeneratorDriver.Create(loadResult.Generators, parsed.Configuration.DriverOptions)
-                let _, result = driver.RunGenerators(snapshot, CancellationToken.None)
-
-                result.Diagnostics |> Seq.iter printDiagnostic
-
-                if result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
+                if sourceFilesResult.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
+                    sourceFilesResult.Diagnostics |> Seq.iter printDiagnostic
                     1
                 else
-                    for sourceFile in result.UpdatedSourceFiles do
-                        printfn "%s" sourceFile
+                    let snapshot =
+                        {
+                            ProjectOptions = projectOptions
+                            SourceFiles = sourceFilesResult.SourceFiles
+                            AdditionalTexts = additionalTextsResult.AdditionalTexts
+                            AnalyzerConfigOptions = analyzerConfigResult.Options
+                        }
 
-                    0
+                    let driver = FSharpGeneratorDriver.Create(loadResult.Generators, parsed.Configuration.DriverOptions)
+                    let _, result = driver.RunGenerators(snapshot, CancellationToken.None)
+
+                    result.Diagnostics |> Seq.iter printDiagnostic
+
+                    if result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
+                        1
+                    else
+                        for sourceFile in result.UpdatedSourceFiles do
+                            printfn "%s" sourceFile
+
+                        0
