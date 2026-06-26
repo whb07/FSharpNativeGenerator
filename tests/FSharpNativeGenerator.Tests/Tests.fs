@@ -2754,6 +2754,22 @@ let ``NuGet analyzer folder generator loads from analyzers dotnet fs`` () =
     )
 
 [<Fact>]
+let ``NuGet analyzer folder generator paths are sorted ordinally`` () =
+    let root = tempRoot ()
+    let packageRoot = fileIn root "package"
+    let analyzerFolder = Path.Combine(packageRoot, "analyzers", "dotnet", "fs")
+    let first = Path.Combine(analyzerFolder, "A.Generator.dll")
+    let second = Path.Combine(analyzerFolder, "B.Generator.dll")
+
+    writeBytes second [| 2uy |]
+    writeBytes first [| 1uy |]
+
+    let generatorPaths =
+        FSharpSourceGeneratorConfiguration.generatorPathsFromNuGetPackage packageRoot
+
+    Assert.Equal<string array>([| first; second |], generatorPaths |> Seq.toArray)
+
+[<Fact>]
 let ``NuGet analyzer folder loading reports missing fs analyzer folder`` () =
     let root = tempRoot ()
     let packageRoot = fileIn root "package"

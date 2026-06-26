@@ -472,7 +472,7 @@ module FSharpSourceGeneratorConfiguration =
 
         if Directory.Exists analyzerRoot then
             Directory.EnumerateFiles(analyzerRoot, "*.dll", SearchOption.AllDirectories)
-            |> Seq.sort
+            |> Seq.sortWith (fun left right -> StringComparer.Ordinal.Compare(left, right))
             |> ImmutableArray.CreateRange
         else
             ImmutableArray<string>.Empty
