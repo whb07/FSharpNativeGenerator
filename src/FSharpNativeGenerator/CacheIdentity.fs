@@ -1,7 +1,10 @@
 namespace FSharp.Compiler.SourceGeneration
 
+open System
 open System.Collections.Immutable
 open System.Collections.Generic
+open System.IO
+open System.Security.Cryptography
 
 module FSharpProjectCacheIdentity =
     let compute (snapshot: FSharpGeneratorProjectSnapshot) (generatedSources: seq<FSharpGeneratedSource>) =
@@ -23,6 +26,14 @@ module FSharpProjectCacheIdentity =
         |> Hashing.sha256Many
 
 module internal FSharpGeneratorDriverIdentity =
+    let private assemblyContentHash location =
+        if String.IsNullOrWhiteSpace location || not (File.Exists location) then
+            "<missing>"
+        else
+            File.ReadAllBytes location
+            |> SHA256.HashData
+            |> Convert.ToHexString
+
     let compute (generators: ImmutableArray<IFSharpIncrementalGenerator>) (options: FSharpGeneratorDriverOptions) =
         seq {
             yield string options.EmitGeneratedFiles
@@ -43,6 +54,7 @@ module internal FSharpGeneratorDriverIdentity =
                 yield string apiVersion
                 yield generatorType.Assembly.Location
                 yield string generatorType.Assembly.ManifestModule.ModuleVersionId
+                yield assemblyContentHash generatorType.Assembly.Location
         }
         |> Hashing.sha256Many
 
