@@ -2268,6 +2268,38 @@ let ``command line parser extracts generator options and preserves unrelated arg
     Assert.Equal(CommandLine, result.Configuration.DriverOptions.HostKind)
 
 [<Fact>]
+let ``command line parser accepts split and equals generator options`` () =
+    let root = tempRoot ()
+    let generatorPath = fileIn root "Generator.dll"
+    let additionalPath = fileIn root "schema.json"
+    let analyzerConfigPath = fileIn root ".globalconfig"
+    let outputPath = fileIn root "generated"
+    let reportPath = fileIn root "report.json"
+
+    let result =
+        FSharpSourceGeneratorConfiguration.parseCommandLineArguments
+            [ "--target:library"
+              "--fsharp-source-generator"
+              generatorPath
+              "--fsharp-generator-additional-file=" + additionalPath
+              "--fsharp-source-generator-analyzer-config"
+              analyzerConfigPath
+              "--emit-fsharp-generated-files=false"
+              "--fsharp-generated-files-output=" + outputPath
+              "--fsharp-source-generator-report"
+              reportPath
+              "Consumer.fs" ]
+
+    Assert.Empty(result.Diagnostics)
+    Assert.Equal<string array>([| "--target:library"; "Consumer.fs" |], result.RemainingArguments |> Seq.toArray)
+    Assert.Equal(generatorPath, result.Configuration.GeneratorPaths.[0])
+    Assert.Equal(additionalPath, result.Configuration.AdditionalFilePaths.[0])
+    Assert.Equal(analyzerConfigPath, result.Configuration.AnalyzerConfigPaths.[0])
+    Assert.False(result.Configuration.DriverOptions.EmitGeneratedFiles)
+    Assert.Equal(Some outputPath, result.Configuration.DriverOptions.GeneratedFilesOutputPath)
+    Assert.Equal(Some reportPath, result.Configuration.DriverOptions.ReportPath)
+
+[<Fact>]
 let ``command line parser reports invalid source generator switches`` () =
     let result =
         FSharpSourceGeneratorConfiguration.parseCommandLineArguments

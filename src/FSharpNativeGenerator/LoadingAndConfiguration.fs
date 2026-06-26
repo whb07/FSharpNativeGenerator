@@ -124,15 +124,42 @@ module FSharpSourceGeneratorConfiguration =
 
     let private normalizePath (path: string) = Path.GetFullPath path
 
-    let private afterPrefix (prefix: string) (argument: string) = argument.Substring(prefix.Length)
+    let private tryOptionValue (optionName: string) (argument: string) =
+        if argument.StartsWith(optionName, StringComparison.Ordinal) then
+            let suffix = argument.Substring(optionName.Length)
+
+            if
+                suffix.StartsWith(":", StringComparison.Ordinal)
+                || suffix.StartsWith("=", StringComparison.Ordinal)
+            then
+                Some(suffix.Substring(1))
+            else
+                None
+        else
+            None
+
+    let private trySwitchValue (optionName: string) (argument: string) =
+        if String.Equals(argument, optionName, StringComparison.Ordinal) then
+            Some ""
+        else
+            match tryOptionValue optionName argument with
+            | Some value -> Some value
+            | None ->
+                if argument.StartsWith(optionName, StringComparison.Ordinal) then
+                    match argument.Substring(optionName.Length) with
+                    | "+"
+                    | "-" as value -> Some value
+                    | _ -> None
+                else
+                    None
 
     let private parseBoolSwitch (value: string) =
         match value with
         | "" -> Some true
         | "+" -> Some true
         | "-" -> Some false
-        | _ when value.Equals(":true", StringComparison.OrdinalIgnoreCase) -> Some true
-        | _ when value.Equals(":false", StringComparison.OrdinalIgnoreCase) -> Some false
+        | _ when value.Equals("true", StringComparison.OrdinalIgnoreCase) -> Some true
+        | _ when value.Equals("false", StringComparison.OrdinalIgnoreCase) -> Some false
         | _ -> None
 
     let private addMissingValueDiagnostic (diagnostics: ResizeArray<FSharpGeneratorDiagnostic>) argument =
@@ -153,53 +180,74 @@ module FSharpSourceGeneratorConfiguration =
 
         let mutable reportPath = FSharpGeneratorDriverOptions.defaults.ReportPath
 
-        for argument in arguments do
-            if argument.StartsWith("--fsharp-source-generator:", StringComparison.Ordinal) then
-                let value = afterPrefix "--fsharp-source-generator:" argument
-
-                if String.IsNullOrWhiteSpace value then
-                    addMissingValueDiagnostic diagnostics argument
-                else
-                    generatorPaths.Add(normalizePath value)
-            elif argument.StartsWith("--fsharp-generator-additional-file:", StringComparison.Ordinal) then
-                let value = afterPrefix "--fsharp-generator-additional-file:" argument
-
-                if String.IsNullOrWhiteSpace value then
-                    addMissingValueDiagnostic diagnostics argument
-                else
-                    additionalFilePaths.Add(normalizePath value)
-            elif argument.StartsWith("--fsharp-source-generator-analyzer-config:", StringComparison.Ordinal) then
-                let value = afterPrefix "--fsharp-source-generator-analyzer-config:" argument
-
-                if String.IsNullOrWhiteSpace value then
-                    addMissingValueDiagnostic diagnostics argument
-                else
-                    analyzerConfigPaths.Add(normalizePath value)
-            elif argument.StartsWith("--fsharp-generated-files-output:", StringComparison.Ordinal) then
-                let value = afterPrefix "--fsharp-generated-files-output:" argument
-
-                if String.IsNullOrWhiteSpace value then
-                    addMissingValueDiagnostic diagnostics argument
-                else
-                    generatedFilesOutputPath <- Some(normalizePath value)
-            elif argument.StartsWith("--fsharp-source-generator-report:", StringComparison.Ordinal) then
-                let value = afterPrefix "--fsharp-source-generator-report:" argument
-
-                if String.IsNullOrWhiteSpace value then
-                    addMissingValueDiagnostic diagnostics argument
-                else
-                    reportPath <- Some(normalizePath value)
-            elif argument.StartsWith("--emit-fsharp-generated-files", StringComparison.Ordinal) then
-                let value = afterPrefix "--emit-fsharp-generated-files" argument
-
-                match parseBoolSwitch value with
-                | Some parsed -> emitGeneratedFiles <- parsed
-                | None ->
-                    diagnostics.Add(
-                        error "FSG0011" (sprintf "Compiler option '%s' has an invalid boolean suffix." argument)
-                    )
+        let addPathOption argument addPath value =
+            if String.IsNullOrWhiteSpace value then
+                addMissingValueDiagnostic diagnostics argument
             else
-                remainingArguments.Add argument
+                addPath (normalizePath value)
+
+        let rec parse remainingArgumentsToParse =
+            match remainingArgumentsToParse with
+            | [] -> ()
+            | argument :: tail ->
+                let splitValue optionName =
+                    match tail with
+                    | value :: rest when String.Equals(argument, optionName, StringComparison.Ordinal) ->
+                        Some(value, rest)
+                    | _ -> None
+
+                let valueOption optionName addValue =
+                    match tryOptionValue optionName argument with
+                    | Some value ->
+                        addPathOption argument addValue value
+                        Some tail
+                    | None ->
+                        match splitValue optionName with
+                        | Some(value, rest) ->
+                            addPathOption argument addValue value
+                            Some rest
+                        | None -> None
+
+                match valueOption "--fsharp-source-generator" generatorPaths.Add with
+                | Some rest -> parse rest
+                | None ->
+                    match valueOption "--fsharp-generator-additional-file" additionalFilePaths.Add with
+                    | Some rest -> parse rest
+                    | None ->
+                        match valueOption "--fsharp-source-generator-analyzer-config" analyzerConfigPaths.Add with
+                        | Some rest -> parse rest
+                        | None ->
+                            match
+                                valueOption "--fsharp-generated-files-output" (fun value ->
+                                    generatedFilesOutputPath <- Some value)
+                            with
+                            | Some rest -> parse rest
+                            | None ->
+                                match
+                                    valueOption "--fsharp-source-generator-report" (fun value ->
+                                        reportPath <- Some value)
+                                with
+                                | Some rest -> parse rest
+                                | None ->
+                                    match trySwitchValue "--emit-fsharp-generated-files" argument with
+                                    | Some value ->
+                                        match parseBoolSwitch value with
+                                        | Some parsed -> emitGeneratedFiles <- parsed
+                                        | None ->
+                                            diagnostics.Add(
+                                                error
+                                                    "FSG0011"
+                                                    (sprintf
+                                                        "Compiler option '%s' has an invalid boolean suffix."
+                                                        argument)
+                                            )
+
+                                        parse tail
+                                    | None ->
+                                        remainingArguments.Add argument
+                                        parse tail
+
+        parse (arguments |> Seq.toList)
 
         let driverOptions =
             { FSharpGeneratorDriverOptions.defaults with
