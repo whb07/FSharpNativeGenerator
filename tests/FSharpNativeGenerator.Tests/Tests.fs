@@ -292,6 +292,19 @@ type AdditionalTextGenerator() =
                     productionContext.AddImplementationSource(hintName, sourceText, Prelude)))
 
 [<FSharpGenerator>]
+type SourceFilesEchoGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            let sourceModuleNames =
+                context.SourceFilesProvider
+                |> FSharpIncrementalValuesProvider.map (fun sourceFile -> "Seen" + Path.GetFileNameWithoutExtension(sourceFile.Path))
+
+            context.RegisterSourceOutput(
+                sourceModuleNames,
+                Action<FSharpSourceProductionContext, string>(fun productionContext moduleName ->
+                    productionContext.AddImplementationSource(moduleName, text ("module " + moduleName), Prelude)))
+
+[<FSharpGenerator>]
 type CancellationObservingGenerator() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
@@ -707,6 +720,28 @@ let ``additional text provider can filter and generate source`` () =
     let generatedSource = Assert.Single(result.GeneratedSources)
     Assert.Equal("Customer", generatedSource.HintName)
     Assert.Contains("module Generated.Customer", generatedSource.SourceText.Text)
+
+[<Fact>]
+let ``source files provider does not see generated outputs from same run`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let project = snapshot Library [ domain ]
+    let driver =
+        FSharpGeneratorDriver.Create(
+            [
+                ImplementationGenerator("GeneratedInput", Prelude)
+                SourceFilesEchoGenerator()
+            ],
+            options)
+
+    let _, result = driver.RunGenerators(project, CancellationToken.None)
+    let hints = result.GeneratedSources |> Seq.map _.HintName |> Seq.toArray
+
+    Assert.Empty(result.Diagnostics)
+    Assert.Contains("GeneratedInput", hints)
+    Assert.Contains("SeenDomain", hints)
+    Assert.DoesNotContain("SeenGeneratedInput", hints)
 
 [<Fact>]
 let ``analyzer config provider can drive generated output`` () =
