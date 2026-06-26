@@ -73,14 +73,17 @@ module internal CacheIdentityParts =
         loop (projectOptions.OtherOptions |> Seq.toList) []
 
     let dictionaryParts (values: IReadOnlyDictionary<string, string>) =
-        values
-        |> Seq.map (fun pair -> pair.Key, pair.Value)
-        |> Seq.sortBy fst
-        |> Seq.collect (fun (key, value) ->
-            seq {
-                key
-                value
-            })
+        if obj.ReferenceEquals(values, null) then
+            seq { "<null-options>" }
+        else
+            values
+            |> Seq.map (fun pair -> pair.Key, pair.Value)
+            |> Seq.sortBy fst
+            |> Seq.collect (fun (key, value) ->
+                seq {
+                    key
+                    value
+                })
 
     let additionalTextChecksumParts (additionalText: FSharpAdditionalText) (cancellationToken: CancellationToken) =
         seq {
