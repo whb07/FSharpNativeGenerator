@@ -158,6 +158,12 @@ type FSharpAnalyzerConfigOptions =
         GetOptionsForPath: string -> IReadOnlyDictionary<string, string>
     }
 
+type FSharpAnalyzerConfigOptionsLoadResult =
+    {
+        Options: FSharpAnalyzerConfigOptions
+        Diagnostics: ImmutableArray<FSharpGeneratorDiagnostic>
+    }
+
 type FSharpGeneratorProjectSnapshot =
     {
         ProjectOptions: FSharpProjectOptions

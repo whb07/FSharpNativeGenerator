@@ -1,6 +1,7 @@
 namespace FSharp.Compiler.SourceGeneration
 
 open System
+open System.Collections.Generic
 open System.Collections.Immutable
 open System.IO
 open System.Reflection
@@ -181,6 +182,104 @@ module FSharpSourceGeneratorConfiguration =
         configuration.AdditionalFilePaths
         |> Seq.map FSharpAdditionalText.fromFile
         |> ImmutableArray.CreateRange
+
+    let private emptyAnalyzerConfigOptions =
+        {
+            GlobalOptions = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string>
+            GetOptionsForPath = fun _ -> Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string>
+        }
+
+    let private trimSection (line: string) =
+        line.Substring(1, line.Length - 2).Trim()
+
+    let private tryKeyValue (line: string) =
+        let index = line.IndexOf('=')
+
+        if index < 0 then
+            None
+        else
+            let key = line.Substring(0, index).Trim()
+            let value = line.Substring(index + 1).Trim()
+
+            if String.IsNullOrWhiteSpace key then
+                None
+            else
+                Some(key, value)
+
+    let private sectionMatchesPath (section: string) (path: string) =
+        let fileName = Path.GetFileName(path)
+        let normalizedPath = Path.GetFullPath(path)
+        let normalizedSection = section.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar)
+
+        section = "*"
+        || (section.StartsWith("*.", StringComparison.Ordinal) && fileName.EndsWith(section.Substring(1), StringComparison.OrdinalIgnoreCase))
+        || fileName.Equals(section, StringComparison.OrdinalIgnoreCase)
+        || normalizedPath.EndsWith(normalizedSection, StringComparison.OrdinalIgnoreCase)
+
+    let analyzerConfigOptions (configuration: FSharpSourceGeneratorConfiguration) =
+        if configuration.AnalyzerConfigPaths.IsDefaultOrEmpty then
+            {
+                Options = emptyAnalyzerConfigOptions
+                Diagnostics = ImmutableArray<FSharpGeneratorDiagnostic>.Empty
+            }
+        else
+            let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
+            let globalOptions = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            let sectionOptions = ResizeArray<string * Dictionary<string, string>>()
+
+            for configPath in configuration.AnalyzerConfigPaths do
+                if not (File.Exists configPath) then
+                    diagnostics.Add({ error "FSG0011" (sprintf "Analyzer config file '%s' does not exist." configPath) with FilePath = Some configPath })
+                else
+                    let mutable currentSection: string option = None
+
+                    for rawLine in File.ReadAllLines configPath do
+                        let line = rawLine.Trim()
+
+                        if String.IsNullOrWhiteSpace line || line.StartsWith("#", StringComparison.Ordinal) || line.StartsWith(";", StringComparison.Ordinal) then
+                            ()
+                        elif line.StartsWith("[", StringComparison.Ordinal) && line.EndsWith("]", StringComparison.Ordinal) then
+                            currentSection <- Some(trimSection line)
+                        else
+                            match tryKeyValue line with
+                            | None ->
+                                diagnostics.Add({ error "FSG0011" (sprintf "Invalid analyzer config line '%s'." rawLine) with FilePath = Some configPath })
+                            | Some(key, value) ->
+                                match currentSection with
+                                | None -> globalOptions[key] <- value
+                                | Some section ->
+                                    let existing =
+                                        sectionOptions
+                                        |> Seq.tryFind (fun (candidate, _) -> candidate.Equals(section, StringComparison.OrdinalIgnoreCase))
+
+                                    let values =
+                                        match existing with
+                                        | Some(_, options) -> options
+                                        | None ->
+                                            let options = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                                            sectionOptions.Add(section, options)
+                                            options
+
+                                    values[key] <- value
+
+            let optionsForPath path =
+                let merged = Dictionary<string, string>(globalOptions, StringComparer.OrdinalIgnoreCase)
+
+                for section, options in sectionOptions do
+                    if sectionMatchesPath section path then
+                        for pair in options do
+                            merged[pair.Key] <- pair.Value
+
+                merged :> IReadOnlyDictionary<string, string>
+
+            {
+                Options =
+                    {
+                        GlobalOptions = globalOptions :> IReadOnlyDictionary<string, string>
+                        GetOptionsForPath = optionsForPath
+                    }
+                Diagnostics = ImmutableArray.CreateRange diagnostics
+            }
 
     let loadGenerators (configuration: FSharpSourceGeneratorConfiguration) =
         let loadResults =

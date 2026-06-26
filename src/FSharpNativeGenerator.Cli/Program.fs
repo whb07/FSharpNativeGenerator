@@ -1,7 +1,6 @@
 namespace FSharpNativeGenerator.Cli
 
 open System
-open System.Collections.Generic
 open System.Collections.Immutable
 open System.IO
 open System.Threading
@@ -46,12 +45,6 @@ Generator options:
                 IsSignatureFile = fullPath.EndsWith(".fsi", StringComparison.OrdinalIgnoreCase)
             }
 
-    let private analyzerConfigOptions =
-        {
-            GlobalOptions = Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
-            GetOptionsForPath = fun _ -> Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
-        }
-
     let private printDiagnostic (diagnostic: FSharpGeneratorDiagnostic) =
         let location = diagnostic.FilePath |> Option.defaultValue ""
         eprintfn "%s %A %s %s" diagnostic.Id diagnostic.Severity location diagnostic.Message
@@ -70,9 +63,11 @@ Generator options:
         else
             let loadResult = FSharpSourceGeneratorConfiguration.loadGenerators parsed.Configuration
             let loadDiagnostics = loadResult.Diagnostics
+            let analyzerConfigResult = FSharpSourceGeneratorConfiguration.analyzerConfigOptions parsed.Configuration
 
-            if loadDiagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
+            if Seq.append loadDiagnostics analyzerConfigResult.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
                 loadDiagnostics |> Seq.iter printDiagnostic
+                analyzerConfigResult.Diagnostics |> Seq.iter printDiagnostic
                 1
             else
                 let projectOptions =
@@ -90,7 +85,7 @@ Generator options:
                         ProjectOptions = projectOptions
                         SourceFiles = sourceFiles |> Seq.map sourceSnapshot |> ImmutableArray.CreateRange
                         AdditionalTexts = FSharpSourceGeneratorConfiguration.additionalTexts parsed.Configuration
-                        AnalyzerConfigOptions = analyzerConfigOptions
+                        AnalyzerConfigOptions = analyzerConfigResult.Options
                     }
 
                 let driver = FSharpGeneratorDriver.Create(loadResult.Generators, parsed.Configuration.DriverOptions)

@@ -937,6 +937,51 @@ let ``configuration creates additional text snapshots from files`` () =
     Assert.Contains("Customer", additionalText.GetText(CancellationToken.None).Value.Text)
 
 [<Fact>]
+let ``configuration loads global and per-path analyzer config options`` () =
+    let root = tempRoot ()
+    let configPath = fileIn root ".globalconfig"
+    let sourcePath = fileIn root "Customer.fs"
+
+    writeFile
+        configPath
+        """is_global = true
+build_property.GeneratedModuleName = GlobalModule
+
+[*.fs]
+build_property.GeneratedModuleName = FsModule
+dotnet_diagnostic.test.severity = warning
+"""
+
+    let parsed =
+        FSharpSourceGeneratorConfiguration.parseCommandLineArguments
+            [
+                "--fsharp-source-generator-analyzer-config:" + configPath
+            ]
+
+    let result = FSharpSourceGeneratorConfiguration.analyzerConfigOptions parsed.Configuration
+    let sourceOptions = result.Options.GetOptionsForPath sourcePath
+
+    Assert.Empty(result.Diagnostics)
+    Assert.Equal("true", result.Options.GlobalOptions["is_global"])
+    Assert.Equal("GlobalModule", result.Options.GlobalOptions["build_property.GeneratedModuleName"])
+    Assert.Equal("FsModule", sourceOptions["build_property.GeneratedModuleName"])
+    Assert.Equal("warning", sourceOptions["dotnet_diagnostic.test.severity"])
+
+[<Fact>]
+let ``configuration reports missing analyzer config files`` () =
+    let root = tempRoot ()
+    let missingConfigPath = fileIn root "missing.globalconfig"
+    let parsed =
+        FSharpSourceGeneratorConfiguration.parseCommandLineArguments
+            [
+                "--fsharp-source-generator-analyzer-config:" + missingConfigPath
+            ]
+
+    let result = FSharpSourceGeneratorConfiguration.analyzerConfigOptions parsed.Configuration
+
+    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0011" && diagnostic.FilePath = Some missingConfigPath))
+
+[<Fact>]
 let ``configuration loads generators from configured assembly paths`` () =
     let assemblyPath = Assembly.GetExecutingAssembly().Location
     let result =
@@ -993,6 +1038,54 @@ let ``CLI runs generators without MSBuild and prints updated source list`` () =
         |> Seq.find (fun item -> item.GetProperty("HintName").GetString() = "GeneratedPrelude")
 
     let generatedPath = generatedPrelude.GetProperty("ResolvedPath").GetString()
+
+    Assert.Contains(generatedPath, output)
+    Assert.True(File.Exists(generatedPath), generatedPath)
+
+[<Fact>]
+let ``CLI passes analyzer config options to loaded generators`` () =
+    let root = tempRoot ()
+    let consumer = fileIn root "Consumer.fs"
+    let configPath = fileIn root ".globalconfig"
+    let generatedOutput = fileIn root "generated"
+    let reportPath = fileIn root "report.json"
+    let repositoryRoot = repoRoot ()
+    let cliProject = Path.Combine(repositoryRoot, "src/FSharpNativeGenerator.Cli/FSharpNativeGenerator.Cli.fsproj") |> Path.GetFullPath
+    let generatorAssembly =
+        Path.Combine(repositoryRoot, "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        |> Path.GetFullPath
+
+    writeFile consumer "module Consumer\nlet value = ConfiguredPrelude.answer"
+    writeFile configPath "build_property.GeneratedModuleName = ConfiguredPrelude"
+
+    let arguments =
+        String.concat
+            " "
+            [
+                "run"
+                "--project"
+                "\"" + cliProject + "\""
+                "--"
+                "--fsharp-source-generator:" + "\"" + generatorAssembly + "\""
+                "--fsharp-source-generator-analyzer-config:" + "\"" + configPath + "\""
+                "--emit-fsharp-generated-files+"
+                "--fsharp-generated-files-output:" + "\"" + generatedOutput + "\""
+                "--fsharp-source-generator-report:" + "\"" + reportPath + "\""
+                "\"" + consumer + "\""
+            ]
+
+    let exitCode, output, error = runProcess "dotnet" arguments root
+
+    if exitCode <> 0 then
+        failwith (output + error)
+
+    use report = JsonDocument.Parse(File.ReadAllText(reportPath))
+    let generatedSources = report.RootElement.GetProperty("GeneratedSources")
+    let configuredPrelude =
+        generatedSources.EnumerateArray()
+        |> Seq.find (fun item -> item.GetProperty("HintName").GetString() = "ConfiguredPrelude")
+
+    let generatedPath = configuredPrelude.GetProperty("ResolvedPath").GetString()
 
     Assert.Contains(generatedPath, output)
     Assert.True(File.Exists(generatedPath), generatedPath)
