@@ -13,6 +13,54 @@ type internal FSharpGeneratorRunCacheEntry =
         Result: FSharpGeneratorDriverRunResult
     }
 
+module private ProjectOutputPath =
+    let private tryPrefixedValue (prefix: string) (value: string) =
+        if value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) then
+            let candidate = value.Substring(prefix.Length)
+
+            if String.IsNullOrWhiteSpace candidate then
+                None
+            else
+                Some candidate
+        else
+            None
+
+    let private projectDirectory (projectOptions: FSharpProjectOptions) =
+        let projectPath = Path.GetFullPath projectOptions.ProjectFilePath
+        let directory = Path.GetDirectoryName projectPath
+
+        if String.IsNullOrWhiteSpace directory then
+            Environment.CurrentDirectory
+        else
+            directory
+
+    let private normalize (projectOptions: FSharpProjectOptions) (path: string) =
+        let trimmedPath = path.Trim().Trim('"')
+
+        if Path.IsPathRooted trimmedPath then
+            Path.GetFullPath trimmedPath
+        else
+            Path.GetFullPath(Path.Combine(projectDirectory projectOptions, trimmedPath))
+
+    let tryGet (projectOptions: FSharpProjectOptions) =
+        let rec loop remainingOptions =
+            match remainingOptions with
+            | [] -> None
+            | option :: value :: _ when String.Equals(option, "--out", StringComparison.OrdinalIgnoreCase) || String.Equals(option, "-o", StringComparison.OrdinalIgnoreCase) ->
+                Some value
+            | option :: tail ->
+                match tryPrefixedValue "--out:" option with
+                | Some value -> Some value
+                | None ->
+                    match tryPrefixedValue "-o:" option with
+                    | Some value -> Some value
+                    | None -> loop tail
+
+        projectOptions.OtherOptions
+        |> Seq.toList
+        |> loop
+        |> Option.map (normalize projectOptions)
+
 type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementalGenerator>, options: FSharpGeneratorDriverOptions, registeredGenerators: ImmutableArray<RegisteredGenerator> option, runCacheEntry: FSharpGeneratorRunCacheEntry option) =
     static member Create(generators: seq<IFSharpIncrementalGenerator>, options: FSharpGeneratorDriverOptions) =
         FSharpGeneratorDriver(ImmutableArray.CreateRange generators, options, None, None)
@@ -157,6 +205,19 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
 
             if options.MaxGenerationPasses <> 1 then
                 diagnostics.Add(Diagnostics.error "FSG0010" "Fixed-point generation is not supported in V1. MaxGenerationPasses must be 1.")
+
+            match ProjectOutputPath.tryGet projectSnapshot.ProjectOptions with
+            | Some projectOutputPath ->
+                for generator in initializedGenerators do
+                    let generatorAssemblyPath = generator.Generator.GetType().Assembly.Location
+
+                    if
+                        not (String.IsNullOrWhiteSpace generatorAssemblyPath)
+                        && String.Equals(Path.GetFullPath generatorAssemblyPath, projectOutputPath, StringComparison.OrdinalIgnoreCase)
+                    then
+                        diagnostics.Add(Diagnostics.error "FSG0002" (sprintf "Generator type '%s' cannot be used while building the assembly that defines it ('%s')." generator.GeneratorName projectOutputPath))
+            | None ->
+                ()
 
             let runnableGenerators = ResizeArray<RegisteredGenerator>()
 

@@ -100,6 +100,18 @@ let private snapshotWithAnalyzerOptions outputKind sourceFiles (globalOptions: s
                 }
     }
 
+let private snapshotWithOtherOptions outputKind sourceFiles otherOptions =
+    let baseSnapshot = snapshot outputKind sourceFiles
+
+    {
+        baseSnapshot with
+            ProjectOptions =
+                {
+                    baseSnapshot.ProjectOptions with
+                        OtherOptions = immutableArray otherOptions
+                }
+    }
+
 let private writeFile path (content: string) =
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))) |> ignore
     File.WriteAllText(path, content)
@@ -704,6 +716,37 @@ let ``missing marker attribute fails generator initialization`` () =
     let result = snapshot Library [ domain ] |> runWith options (UnmarkedGenerator())
 
     Assert.True(hasDiagnostic "FSG0002" result)
+
+[<Fact>]
+let ``generator assembly matching compiler output is rejected`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let generatorAssemblyPath = Path.GetFullPath typeof<ImplementationGenerator>.Assembly.Location
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let project = snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "--out:" + generatorAssemblyPath ]
+
+    let result = project |> runWith options (ImplementationGenerator("Generated", Prelude))
+
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains("defines it", StringComparison.OrdinalIgnoreCase)))
+
+    Assert.Contains(nameof(ImplementationGenerator), diagnostic.Message)
+    Assert.Contains(generatorAssemblyPath, diagnostic.Message)
+    Assert.Empty(result.GeneratedSources)
+    Assert.Equal<string array>([| domain |], result.UpdatedSourceFiles |> Seq.toArray)
+
+[<Fact>]
+let ``split compiler output option is used for generator assembly validation`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let generatorAssemblyPath = Path.GetFullPath typeof<ImplementationGenerator>.Assembly.Location
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let project = snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "--out"; generatorAssemblyPath ]
+
+    let result = project |> runWith options (ImplementationGenerator("Generated", Prelude))
+
+    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains(generatorAssemblyPath, StringComparison.OrdinalIgnoreCase)))
+    Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
 let ``initialization exception is reported`` () =
