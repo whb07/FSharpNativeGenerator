@@ -388,6 +388,21 @@ type InvalidSourceGenerator(hintName: string, source: string) =
                     productionContext.AddImplementationSource(hintName, text source, Prelude)))
 
 [<FSharpGenerator>]
+type ReportingDiagnosticGenerator(severity: FSharpDiagnosticSeverity) =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    productionContext.ReportDiagnostic(
+                        {
+                            FSharpGeneratorDiagnostic.create "TESTDIAG" "Generator reported diagnostic." severity with
+                                FilePath = Some "schema.test"
+                        })
+
+                    productionContext.AddImplementationSource("ReportedDiagnosticOutput", text "module ReportedDiagnosticOutput", Prelude)))
+
+[<FSharpGenerator>]
 type CountingGenerator(counter: ref<int>) =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
@@ -668,6 +683,31 @@ let ``execution exception is reported`` () =
     let result = snapshot Library [ domain ] |> runWith options (ThrowingExecutionGenerator())
 
     Assert.True(hasDiagnostic "FSG0004" result)
+
+[<Fact>]
+let ``reported warning diagnostic does not suppress generated source`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let result = snapshot Library [ domain ] |> runWith options (ReportingDiagnosticGenerator(Warning))
+
+    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "TESTDIAG"))
+    Assert.Equal(Warning, diagnostic.Severity)
+    Assert.Equal(Some "schema.test", diagnostic.FilePath)
+    Assert.Single(result.GeneratedSources) |> ignore
+
+[<Fact>]
+let ``reported error diagnostic suppresses generated source`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let result = snapshot Library [ domain ] |> runWith options (ReportingDiagnosticGenerator(Error))
+
+    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "TESTDIAG"))
+    Assert.Equal(Error, diagnostic.Severity)
+    Assert.Equal(Some "schema.test", diagnostic.FilePath)
+    Assert.Empty(result.GeneratedSources)
+    Assert.Equal<string array>([| domain |], result.UpdatedSourceFiles |> Seq.toArray)
 
 [<Fact>]
 let ``generated signature companion is placed before implementation`` () =
