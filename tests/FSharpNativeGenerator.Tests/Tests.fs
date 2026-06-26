@@ -2303,10 +2303,12 @@ let ``command line parser accepts split and equals generator options`` () =
 let ``command line parser reports invalid source generator switches`` () =
     let result =
         FSharpSourceGeneratorConfiguration.parseCommandLineArguments
-            [ "--fsharp-source-generator:"; "--emit-fsharp-generated-files:maybe" ]
+            [ "--fsharp-source-generator:"
+              "--emit-fsharp-generated-files:maybe"
+              "--fsharp-generated-files-output" ]
 
     Assert.Equal(
-        2,
+        3,
         result.Diagnostics
         |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011")
         |> Seq.length

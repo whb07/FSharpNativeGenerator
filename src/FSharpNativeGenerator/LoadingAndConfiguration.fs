@@ -190,22 +190,20 @@ module FSharpSourceGeneratorConfiguration =
             match remainingArgumentsToParse with
             | [] -> ()
             | argument :: tail ->
-                let splitValue optionName =
-                    match tail with
-                    | value :: rest when String.Equals(argument, optionName, StringComparison.Ordinal) ->
-                        Some(value, rest)
-                    | _ -> None
-
                 let valueOption optionName addValue =
-                    match tryOptionValue optionName argument with
-                    | Some value ->
-                        addPathOption argument addValue value
-                        Some tail
-                    | None ->
-                        match splitValue optionName with
-                        | Some(value, rest) ->
+                    if String.Equals(argument, optionName, StringComparison.Ordinal) then
+                        match tail with
+                        | value :: rest ->
                             addPathOption argument addValue value
                             Some rest
+                        | [] ->
+                            addMissingValueDiagnostic diagnostics argument
+                            Some []
+                    else
+                        match tryOptionValue optionName argument with
+                        | Some value ->
+                            addPathOption argument addValue value
+                            Some tail
                         | None -> None
 
                 match valueOption "--fsharp-source-generator" generatorPaths.Add with
