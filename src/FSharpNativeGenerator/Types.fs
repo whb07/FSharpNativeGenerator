@@ -183,9 +183,26 @@ type FSharpGeneratedSource =
         Checksum: ImmutableArray<byte>
     }
 
+module FSharpGeneratorApiVersion =
+    [<Literal>]
+    let Current = 1
+
 [<AttributeUsage(AttributeTargets.Class, AllowMultiple = false)>]
-type FSharpGeneratorAttribute() =
+type FSharpGeneratorAttribute(apiVersion: int) =
     inherit Attribute()
+
+    new() = FSharpGeneratorAttribute(FSharpGeneratorApiVersion.Current)
+
+    member _.ApiVersion = apiVersion
+
+module internal FSharpGeneratorAttributeHelpers =
+    let tryGet (candidate: Type) =
+        candidate.GetCustomAttributes(typeof<FSharpGeneratorAttribute>, false)
+        |> Seq.cast<FSharpGeneratorAttribute>
+        |> Seq.tryHead
+
+    let isSupportedApiVersion (attribute: FSharpGeneratorAttribute) =
+        attribute.ApiVersion = FSharpGeneratorApiVersion.Current
 
 type FSharpGeneratorDriverOptions =
     {

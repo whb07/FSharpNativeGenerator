@@ -258,6 +258,12 @@ type NoOutputGeneratorB() =
         member _.Initialize _ =
             ()
 
+[<FSharpGenerator(999)>]
+type UnsupportedApiGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize _ =
+            ()
+
 [<FSharpGenerator>]
 type LoadableGenerator() =
     interface IFSharpIncrementalGenerator with
@@ -751,12 +757,23 @@ let ``fixed point generation request is rejected`` () =
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
+let ``unsupported generator API version is rejected by driver`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let result = snapshot Library [ domain ] |> runWith options (UnsupportedApiGenerator())
+
+    Assert.True(hasDiagnostic "FSG0015" result)
+    Assert.Empty(result.GeneratedSources)
+
+[<Fact>]
 let ``assembly loader discovers attributed parameterless generators`` () =
     let assemblyPath = Assembly.GetExecutingAssembly().Location
     let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
 
-    Assert.Empty(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Severity = Error && diagnostic.Id <> "FSG0002"))
+    Assert.Empty(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Severity = Error && diagnostic.Id <> "FSG0002" && diagnostic.Id <> "FSG0015"))
     Assert.Contains(result.Generators, fun generator -> generator.GetType() = typeof<LoadableGenerator>)
+    Assert.DoesNotContain(result.Generators, fun generator -> generator.GetType() = typeof<UnsupportedApiGenerator>)
 
 [<Fact>]
 let ``assembly loader reports attributed type without generator interface`` () =
@@ -764,6 +781,13 @@ let ``assembly loader reports attributed type without generator interface`` () =
     let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
 
     Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains(nameof(InvalidAttributedType), StringComparison.Ordinal)))
+
+[<Fact>]
+let ``assembly loader reports unsupported generator API version`` () =
+    let assemblyPath = Assembly.GetExecutingAssembly().Location
+    let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
+
+    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0015" && diagnostic.Message.Contains(nameof(UnsupportedApiGenerator), StringComparison.Ordinal)))
 
 [<Fact>]
 let ``emit generated files writes configured output path`` () =

@@ -19,9 +19,6 @@ module FSharpGeneratorAssemblyLoader =
     let private isPublicConcrete (candidate: Type) =
         (candidate.IsPublic || candidate.IsNestedPublic) && not candidate.IsAbstract
 
-    let private hasGeneratorAttribute (candidate: Type) =
-        candidate.GetCustomAttributes(typeof<FSharpGeneratorAttribute>, false).Length > 0
-
     let private implementsGenerator (candidate: Type) =
         typeof<IFSharpIncrementalGenerator>.IsAssignableFrom(candidate)
 
@@ -33,20 +30,26 @@ module FSharpGeneratorAssemblyLoader =
             let assembly = Assembly.LoadFrom(Path.GetFullPath(path))
 
             for candidate in assembly.GetTypes() |> Array.filter isPublicConcrete do
-                let hasAttribute = hasGeneratorAttribute candidate
                 let hasInterface = implementsGenerator candidate
 
-                if hasAttribute && hasInterface then
-                    match candidate.GetConstructor(Type.EmptyTypes) with
-                    | null ->
-                        diagnostics.Add(error "FSG0002" (sprintf "Generator type '%s' must have a public parameterless constructor." candidate.FullName))
-                    | _ ->
-                        try
-                            generators.Add(Activator.CreateInstance(candidate) :?> IFSharpIncrementalGenerator)
-                        with ex ->
-                            diagnostics.Add(error "FSG0001" (sprintf "Generator type '%s' could not be created: %s" candidate.FullName ex.Message))
-                elif hasAttribute <> hasInterface then
+                match FSharpGeneratorAttributeHelpers.tryGet candidate, hasInterface with
+                | Some generatorAttribute, true ->
+                    if not (FSharpGeneratorAttributeHelpers.isSupportedApiVersion generatorAttribute) then
+                        diagnostics.Add(error "FSG0015" (sprintf "Generator type '%s' references unsupported F# source-generation API version %d. Supported version is %d." candidate.FullName generatorAttribute.ApiVersion FSharpGeneratorApiVersion.Current))
+                    else
+                        match candidate.GetConstructor(Type.EmptyTypes) with
+                        | null ->
+                            diagnostics.Add(error "FSG0002" (sprintf "Generator type '%s' must have a public parameterless constructor." candidate.FullName))
+                        | _ ->
+                            try
+                                generators.Add(Activator.CreateInstance(candidate) :?> IFSharpIncrementalGenerator)
+                            with ex ->
+                                diagnostics.Add(error "FSG0001" (sprintf "Generator type '%s' could not be created: %s" candidate.FullName ex.Message))
+                | Some _, false
+                | None, true ->
                     diagnostics.Add(error "FSG0002" (sprintf "Generator type '%s' must have both FSharpGeneratorAttribute and IFSharpIncrementalGenerator." candidate.FullName))
+                | None, false ->
+                    ()
         with ex ->
             diagnostics.Add({ error "FSG0001" (sprintf "Generator assembly load failed: %s" ex.Message) with FilePath = Some path })
 

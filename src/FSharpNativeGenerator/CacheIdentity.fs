@@ -34,7 +34,13 @@ module internal FSharpGeneratorDriverIdentity =
 
             for generator in generators do
                 let generatorType = generator.GetType()
+                let apiVersion =
+                    FSharpGeneratorAttributeHelpers.tryGet generatorType
+                    |> Option.map _.ApiVersion
+                    |> Option.defaultValue 0
+
                 yield generatorType.FullName
+                yield string apiVersion
                 yield generatorType.Assembly.Location
                 yield string generatorType.Assembly.ManifestModule.ModuleVersionId
         }

@@ -32,12 +32,14 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
                     let sourceOutputs = ResizeArray<RegisteredSourceOutput>()
                     let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
 
-                    let hasMarker =
-                        generatorType.GetCustomAttributes(typeof<FSharpGeneratorAttribute>, false).Length > 0
+                    let generatorAttribute = FSharpGeneratorAttributeHelpers.tryGet generatorType
 
-                    if not hasMarker then
+                    match generatorAttribute with
+                    | None ->
                         diagnostics.Add(Diagnostics.error "FSG0002" (sprintf "Generator type '%s' is missing FSharpGeneratorAttribute." generatorName))
-                    else
+                    | Some attribute when not (FSharpGeneratorAttributeHelpers.isSupportedApiVersion attribute) ->
+                        diagnostics.Add(Diagnostics.error "FSG0015" (sprintf "Generator type '%s' references unsupported F# source-generation API version %d. Supported version is %d." generatorName attribute.ApiVersion FSharpGeneratorApiVersion.Current))
+                    | Some _ ->
                         let initContext =
                             FSharpIncrementalGeneratorInitializationContext(
                                 { Evaluate = fun snapshot -> snapshot.ProjectOptions },
