@@ -2293,6 +2293,44 @@ let ``report path is updated for cached generator runs`` () =
     Assert.True(report.RootElement.GetProperty("CacheHit").GetBoolean())
 
 [<Fact>]
+let ``relative report path resolves against project directory for fresh and cached runs`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let projectPath = fileIn root "src/App.fsproj"
+    let reportFolder = Path.Combine("reports", Guid.NewGuid().ToString("N"))
+    let reportPath = Path.Combine(reportFolder, "generator.json")
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated"
+            ReportPath = Some reportPath }
+
+    let baseProject = snapshot Library [ domain ]
+
+    let project =
+        { baseProject with
+            ProjectOptions =
+                { baseProject.ProjectOptions with
+                    ProjectFilePath = projectPath } }
+
+    let expectedReportPath =
+        Path.Combine(Path.GetDirectoryName(projectPath), reportPath) |> Path.GetFullPath
+
+    let driver =
+        FSharpGeneratorDriver.Create([ ImplementationGenerator("Generated", Prelude) ], options)
+
+    let updatedDriver, first = driver.RunGenerators(project, CancellationToken.None)
+    let _, second = updatedDriver.RunGenerators(project, CancellationToken.None)
+
+    Assert.False(first.CacheHit)
+    Assert.True(second.CacheHit)
+    Assert.True(File.Exists(expectedReportPath), expectedReportPath)
+    Assert.False(File.Exists(Path.Combine(Environment.CurrentDirectory, reportPath)))
+
+    use report = JsonDocument.Parse(File.ReadAllText(expectedReportPath))
+    Assert.True(report.RootElement.GetProperty("CacheHit").GetBoolean())
+
+[<Fact>]
 let ``generated ordered source list builds in a real FSharp project`` () =
     let root = tempRoot ()
     let generatedRoot = fileIn root "generated"

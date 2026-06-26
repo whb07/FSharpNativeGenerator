@@ -515,7 +515,9 @@ type FSharpGeneratorDriver
                   ElapsedMilliseconds = stopwatch.ElapsedMilliseconds
                   CacheHit = false }
 
-            options.ReportPath |> Option.iter (fun path -> RunReport.write path result)
+            options.ReportPath
+            |> Option.map (ProjectRelativePath.normalize projectSnapshot.ProjectOptions)
+            |> Option.iter (fun path -> RunReport.write path result)
 
             FSharpGeneratorDriver(
                 generators,
@@ -533,6 +535,7 @@ type FSharpGeneratorDriver
                     ElapsedMilliseconds = stopwatch.ElapsedMilliseconds }
 
             options.ReportPath
+            |> Option.map (ProjectRelativePath.normalize projectSnapshot.ProjectOptions)
             |> Option.iter (fun path -> RunReport.write path cachedResult)
 
             updatedDriver, cachedResult
