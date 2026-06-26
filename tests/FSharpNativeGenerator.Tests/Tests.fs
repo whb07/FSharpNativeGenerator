@@ -2530,6 +2530,69 @@ let ``command line parser accepts split and equals generator options`` () =
     Assert.Equal(Some reportPath, result.Configuration.DriverOptions.ReportPath)
 
 [<Fact>]
+let ``command line parser expands response files`` () =
+    let root = tempRoot ()
+    let generatorPath = fileIn root "Generator With Spaces.dll"
+    let additionalPath = fileIn root "schema with spaces.json"
+    let outputPath = fileIn root "generated output"
+    let responsePath = fileIn root "generator.rsp"
+
+    writeFile
+        responsePath
+        (String.concat
+            Environment.NewLine
+            [ "# generator options"
+              "--target:library"
+              "--fsharp-source-generator \"" + generatorPath + "\""
+              "--fsharp-generator-additional-file=\"" + additionalPath + "\""
+              "--emit-fsharp-generated-files+"
+              "--fsharp-generated-files-output \"" + outputPath + "\""
+              "Consumer.fs" ])
+
+    let result =
+        FSharpSourceGeneratorConfiguration.parseCommandLineArguments [ "@" + responsePath ]
+
+    Assert.Empty(result.Diagnostics)
+    Assert.Equal<string array>([| "--target:library"; "Consumer.fs" |], result.RemainingArguments |> Seq.toArray)
+    Assert.Equal(generatorPath, result.Configuration.GeneratorPaths.[0])
+    Assert.Equal(additionalPath, result.Configuration.AdditionalFilePaths.[0])
+    Assert.True(result.Configuration.DriverOptions.EmitGeneratedFiles)
+    Assert.Equal(Some outputPath, result.Configuration.DriverOptions.GeneratedFilesOutputPath)
+
+[<Fact>]
+let ``command line parser reports missing response files`` () =
+    let root = tempRoot ()
+    let responsePath = fileIn root "missing.rsp"
+
+    let result =
+        FSharpSourceGeneratorConfiguration.parseCommandLineArguments [ "@" + responsePath ]
+
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+
+    Assert.Equal(Some responsePath, diagnostic.FilePath)
+    Assert.Empty(result.Configuration.GeneratorPaths)
+
+[<Fact>]
+let ``command line parser reports recursive response files`` () =
+    let root = tempRoot ()
+    let responsePath = fileIn root "recursive.rsp"
+
+    writeFile responsePath ("@" + responsePath)
+
+    let result =
+        FSharpSourceGeneratorConfiguration.parseCommandLineArguments [ "@" + responsePath ]
+
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic ->
+            diagnostic.Id = "FSG0011"
+            && diagnostic.Message.Contains("recursively", StringComparison.OrdinalIgnoreCase))
+    )
+
+    Assert.Empty(result.Configuration.GeneratorPaths)
+
+[<Fact>]
 let ``command line parser reports invalid source generator switches`` () =
     let result =
         FSharpSourceGeneratorConfiguration.parseCommandLineArguments

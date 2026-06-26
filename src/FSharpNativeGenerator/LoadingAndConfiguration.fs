@@ -169,6 +169,78 @@ module FSharpSourceGeneratorConfiguration =
     let private addMissingValueDiagnostic (diagnostics: ResizeArray<FSharpGeneratorDiagnostic>) argument =
         diagnostics.Add(error "FSG0011" (sprintf "Compiler option '%s' requires a value." argument))
 
+    let private tokenizeResponseFile (content: string) =
+        let tokens = ResizeArray<string>()
+        let current = Text.StringBuilder()
+        let mutable inQuote = false
+        let mutable atTokenStart = true
+
+        let flushToken () =
+            if current.Length > 0 then
+                tokens.Add(current.ToString())
+                current.Clear() |> ignore
+
+            atTokenStart <- true
+
+        let rec skipComment index =
+            if index >= content.Length then
+                index
+            else
+                match content[index] with
+                | '\r'
+                | '\n' -> index
+                | _ -> skipComment (index + 1)
+
+        let rec loop index =
+            if index >= content.Length then
+                flushToken ()
+            else
+                match content[index], inQuote with
+                | '"', _ ->
+                    inQuote <- not inQuote
+                    atTokenStart <- false
+                    loop (index + 1)
+                | '#', false when atTokenStart -> loop (skipComment (index + 1))
+                | character, false when Char.IsWhiteSpace character ->
+                    flushToken ()
+                    loop (index + 1)
+                | character, _ ->
+                    current.Append character |> ignore
+                    atTokenStart <- false
+                    loop (index + 1)
+
+        loop 0
+        tokens |> Seq.toList
+
+    let private expandResponseFiles (diagnostics: ResizeArray<FSharpGeneratorDiagnostic>) (arguments: seq<string>) =
+        let rec expand (seen: Set<string>) (argumentsToExpand: string list) =
+            argumentsToExpand
+            |> List.collect (fun argument ->
+                if argument.StartsWith("@", StringComparison.Ordinal) && argument.Length > 1 then
+                    let responsePath = normalizePath (argument.Substring 1)
+
+                    if seen |> Set.contains responsePath then
+                        diagnostics.Add(
+                            error "FSG0011" (sprintf "Response file '%s' includes itself recursively." responsePath)
+                        )
+
+                        []
+                    elif not (File.Exists responsePath) then
+                        diagnostics.Add(
+                            { error "FSG0011" (sprintf "Response file '%s' does not exist." responsePath) with
+                                FilePath = Some responsePath }
+                        )
+
+                        []
+                    else
+                        File.ReadAllText responsePath
+                        |> tokenizeResponseFile
+                        |> expand (seen |> Set.add responsePath)
+                else
+                    [ argument ])
+
+        arguments |> Seq.toList |> expand Set.empty
+
     let parseCommandLineArguments (arguments: seq<string>) =
         let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
         let generatorPaths = ResizeArray<string>()
@@ -249,7 +321,7 @@ module FSharpSourceGeneratorConfiguration =
                                         remainingArguments.Add argument
                                         parse tail
 
-        parse (arguments |> Seq.toList)
+        parse (expandResponseFiles diagnostics arguments)
 
         let driverOptions =
             { FSharpGeneratorDriverOptions.defaults with
