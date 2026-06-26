@@ -695,6 +695,35 @@ let ``updated source files resolve generated text from in-memory store`` () =
     Assert.Contains("module Domain", loadResult.SourceFiles.[1].SourceText.Text)
 
 [<Fact>]
+let ``relative generated root resolves against project directory`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let projectPath = fileIn root "src/App.fsproj"
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = Path.Combine("obj", "Generated", "FSharp") }
+
+    let baseProject = snapshot Library [ domain ]
+
+    let project =
+        { baseProject with
+            ProjectOptions =
+                { baseProject.ProjectOptions with
+                    ProjectFilePath = projectPath } }
+
+    let result =
+        project
+        |> runWith options (ImplementationGenerator("GeneratedPrelude", Prelude))
+
+    let expectedRoot =
+        Path.Combine(Path.GetDirectoryName(projectPath), "obj", "Generated", "FSharp")
+        |> Path.GetFullPath
+
+    Assert.Empty(result.Diagnostics)
+    Assert.StartsWith(expectedRoot, result.GeneratedSources.[0].ResolvedPath, StringComparison.OrdinalIgnoreCase)
+
+[<Fact>]
 let ``source snapshot loading reports unresolved paths`` () =
     let root = tempRoot ()
     let missing = fileIn root "Missing.fs"
@@ -2171,6 +2200,47 @@ let ``emit generated files writes configured output path`` () =
 
     Assert.True(File.Exists(outputPath), outputPath)
     Assert.Contains("module Generated", File.ReadAllText(outputPath))
+
+[<Fact>]
+let ``relative generated files output path resolves against project directory`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let projectPath = fileIn root "src/App.fsproj"
+    let outputFolder = Path.Combine("obj", "Written", Guid.NewGuid().ToString("N"))
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = Path.Combine("obj", "Generated", "FSharp")
+            GeneratedFilesOutputPath = Some outputFolder
+            EmitGeneratedFiles = true }
+
+    let baseProject = snapshot Library [ domain ]
+
+    let project =
+        { baseProject with
+            ProjectOptions =
+                { baseProject.ProjectOptions with
+                    ProjectFilePath = projectPath } }
+
+    let result =
+        project |> runWith options (ImplementationGenerator("Generated", Prelude))
+
+    let expectedGeneratedRoot =
+        Path.Combine(Path.GetDirectoryName(projectPath), "obj", "Generated", "FSharp")
+        |> Path.GetFullPath
+
+    let expectedOutputRoot =
+        Path.Combine(Path.GetDirectoryName(projectPath), outputFolder)
+        |> Path.GetFullPath
+
+    let relativePath =
+        Path.GetRelativePath(expectedGeneratedRoot, result.GeneratedSources.[0].ResolvedPath)
+
+    let outputPath = Path.Combine(expectedOutputRoot, relativePath)
+
+    Assert.Empty(result.Diagnostics)
+    Assert.True(File.Exists(outputPath), outputPath)
+    Assert.False(File.Exists(Path.Combine(Environment.CurrentDirectory, outputFolder, relativePath)))
 
 [<Fact>]
 let ``report path writes generated source and diagnostic summary`` () =

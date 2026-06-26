@@ -11,6 +11,24 @@ type internal FSharpGeneratorRunCacheEntry =
     { Key: string
       Result: FSharpGeneratorDriverRunResult }
 
+module private ProjectRelativePath =
+    let projectDirectory (projectOptions: FSharpProjectOptions) =
+        let projectPath = Path.GetFullPath projectOptions.ProjectFilePath
+        let directory = Path.GetDirectoryName projectPath
+
+        if String.IsNullOrWhiteSpace directory then
+            Environment.CurrentDirectory
+        else
+            directory
+
+    let normalize (projectOptions: FSharpProjectOptions) (path: string) =
+        let trimmedPath = path.Trim().Trim('"')
+
+        if Path.IsPathRooted trimmedPath then
+            Path.GetFullPath trimmedPath
+        else
+            Path.GetFullPath(Path.Combine(projectDirectory projectOptions, trimmedPath))
+
 module private ProjectOutputPath =
     let private tryPrefixedValue (prefix: string) (value: string) =
         if value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) then
@@ -22,23 +40,6 @@ module private ProjectOutputPath =
                 Some candidate
         else
             None
-
-    let private projectDirectory (projectOptions: FSharpProjectOptions) =
-        let projectPath = Path.GetFullPath projectOptions.ProjectFilePath
-        let directory = Path.GetDirectoryName projectPath
-
-        if String.IsNullOrWhiteSpace directory then
-            Environment.CurrentDirectory
-        else
-            directory
-
-    let private normalize (projectOptions: FSharpProjectOptions) (path: string) =
-        let trimmedPath = path.Trim().Trim('"')
-
-        if Path.IsPathRooted trimmedPath then
-            Path.GetFullPath trimmedPath
-        else
-            Path.GetFullPath(Path.Combine(projectDirectory projectOptions, trimmedPath))
 
     let tryGet (projectOptions: FSharpProjectOptions) =
         let rec loop remainingOptions =
@@ -64,7 +65,7 @@ module private ProjectOutputPath =
         projectOptions.OtherOptions
         |> Seq.toList
         |> loop
-        |> Option.map (normalize projectOptions)
+        |> Option.map (ProjectRelativePath.normalize projectOptions)
 
 module private GeneratorIdentity =
     let create (generatorType: Type) =
@@ -155,8 +156,11 @@ type FSharpGeneratorDriver
 
             FSharpGeneratorDriver(generators, options, Some registered, runCacheEntry), registered
 
-    member private _.MaterializePending(pending: PendingGeneratedSource list) =
+    member private _.MaterializePending(projectOptions: FSharpProjectOptions, pending: PendingGeneratedSource list) =
         let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
+
+        let generatedRoot =
+            ProjectRelativePath.normalize projectOptions options.GeneratedRoot
 
         let duplicateHints =
             pending
@@ -191,11 +195,7 @@ type FSharpGeneratorDriver
                     None
                 else
                     let resolvedPath =
-                        GeneratedPaths.resolvedPath
-                            options.GeneratedRoot
-                            source.GeneratorName
-                            source.Kind
-                            source.HintName
+                        GeneratedPaths.resolvedPath generatedRoot source.GeneratorName source.Kind source.HintName
 
                     Some
                         { GeneratorName = source.GeneratorName
@@ -352,7 +352,10 @@ type FSharpGeneratorDriver
                             )
 
             let postInitializationMaterialized, postInitializationMaterializeDiagnostics =
-                updatedDriver.MaterializePending(postInitializationPending |> Seq.toList)
+                updatedDriver.MaterializePending(
+                    projectSnapshot.ProjectOptions,
+                    postInitializationPending |> Seq.toList
+                )
 
             diagnostics.AddRange postInitializationMaterializeDiagnostics
 
@@ -419,7 +422,7 @@ type FSharpGeneratorDriver
                 if skipFinalMaterialization then
                     postInitializationMaterialized, []
                 else
-                    updatedDriver.MaterializePending pending
+                    updatedDriver.MaterializePending(projectSnapshot.ProjectOptions, pending)
 
             diagnostics.AddRange materializeDiagnostics
 
@@ -483,11 +486,16 @@ type FSharpGeneratorDriver
                 options.EmitGeneratedFiles
                 && not (diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error))
             then
-                let outputRoot = defaultArg options.GeneratedFilesOutputPath options.GeneratedRoot
+                let generatedRoot =
+                    ProjectRelativePath.normalize projectSnapshot.ProjectOptions options.GeneratedRoot
+
+                let outputRoot =
+                    options.GeneratedFilesOutputPath
+                    |> Option.defaultValue options.GeneratedRoot
+                    |> ProjectRelativePath.normalize projectSnapshot.ProjectOptions
 
                 for source in generatedSources do
-                    let relativePath =
-                        Path.GetRelativePath(Path.GetFullPath(options.GeneratedRoot), source.ResolvedPath)
+                    let relativePath = Path.GetRelativePath(generatedRoot, source.ResolvedPath)
 
                     let outputPath = Path.Combine(outputRoot, relativePath)
                     Directory.CreateDirectory(Path.GetDirectoryName(outputPath)) |> ignore
