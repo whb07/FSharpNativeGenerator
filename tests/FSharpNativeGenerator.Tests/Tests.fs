@@ -944,6 +944,28 @@ let ``MSBuild configuration maps items and properties to driver options`` () =
     Assert.Equal(MSBuild, result.Configuration.DriverOptions.HostKind)
 
 [<Fact>]
+let ``MSBuild source generator item loads generator assembly`` () =
+    let generatorAssembly =
+        Path.Combine(repoRoot (), "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        |> Path.GetFullPath
+
+    let result =
+        FSharpSourceGeneratorConfiguration.fromMSBuildItems
+            [ { Include = generatorAssembly } ]
+            []
+            {
+                EmitFSharpGeneratedFiles = None
+                FSharpGeneratedFilesOutputPath = None
+                FSharpSourceGeneratorReportPath = None
+            }
+
+    let loadResult = FSharpSourceGeneratorConfiguration.loadGenerators result.Configuration
+
+    Assert.Empty(result.Diagnostics)
+    Assert.Empty(loadResult.Diagnostics)
+    Assert.Single(loadResult.Generators) |> ignore
+
+[<Fact>]
 let ``MSBuild configuration reports invalid boolean property`` () =
     let result =
         FSharpSourceGeneratorConfiguration.fromMSBuildItems
