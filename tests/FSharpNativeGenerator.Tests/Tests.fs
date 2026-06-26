@@ -444,6 +444,22 @@ type CyclicAnchorGenerator(root: string) =
             )
 
 [<FSharpGenerator>]
+type GeneratedAnchorGenerator(root: string) =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    let generatorType = typeof<GeneratedAnchorGenerator>
+                    let pathA = generatedPath root generatorType Implementation "A"
+                    let pathB = generatedPath root generatorType Implementation "B"
+
+                    productionContext.AddImplementationSource("A", text "module A", Prelude)
+                    productionContext.AddImplementationSource("B", text "module B", AfterFile pathA)
+                    productionContext.AddImplementationSource("C", text "module C", BeforeFile pathB))
+            )
+
+[<FSharpGenerator>]
 type DuplicateHintGenerator() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
@@ -883,6 +899,33 @@ let ``multiple after file placements preserve generator order`` () =
               program ],
         result.UpdatedSourceFiles
     )
+
+[<Fact>]
+let ``generated file anchors resolve against generated sources`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let generatedRoot = fileIn root "generated"
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = generatedRoot }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (GeneratedAnchorGenerator(generatedRoot))
+
+    let pathA =
+        generatedPath generatedRoot typeof<GeneratedAnchorGenerator> Implementation "A"
+
+    let pathB =
+        generatedPath generatedRoot typeof<GeneratedAnchorGenerator> Implementation "B"
+
+    let pathC =
+        generatedPath generatedRoot typeof<GeneratedAnchorGenerator> Implementation "C"
+
+    Assert.Empty(result.Diagnostics)
+
+    Assert.Equal<IReadOnlyList<string>>(immutableArray [ pathA; pathC; pathB; domain ], result.UpdatedSourceFiles)
 
 [<Fact>]
 let ``before last source preserves application final file`` () =
