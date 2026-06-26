@@ -303,6 +303,12 @@ type AbstractAttributedGenerator() =
             ()
 
 [<FSharpGenerator>]
+type private PrivateAttributedGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize _ =
+            ()
+
+[<FSharpGenerator>]
 type AdditionalTextGenerator() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
@@ -1157,6 +1163,13 @@ let ``assembly loader reports abstract attributed generator type`` () =
     let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
 
     Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains(nameof(AbstractAttributedGenerator), StringComparison.Ordinal) && diagnostic.Message.Contains("abstract", StringComparison.OrdinalIgnoreCase)))
+
+[<Fact>]
+let ``assembly loader reports private attributed generator type`` () =
+    let assemblyPath = Assembly.GetExecutingAssembly().Location
+    let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
+
+    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains("PrivateAttributedGenerator", StringComparison.Ordinal) && diagnostic.Message.Contains("public", StringComparison.OrdinalIgnoreCase)))
 
 [<Fact>]
 let ``assembly loader reports unsupported generator API version`` () =
