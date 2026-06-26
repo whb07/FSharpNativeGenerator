@@ -800,6 +800,42 @@ let ``generated source without module or namespace is rejected`` () =
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
+let ``source snapshot count mismatch fails generation`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let project =
+        {
+            snapshot Library [ domain ] with
+                SourceFiles = ImmutableArray<FSharpSourceFileSnapshot>.Empty
+        }
+
+    let result = project |> runWith options (ImplementationGenerator("Generated", Prelude))
+
+    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+    Assert.Contains("source file count", diagnostic.Message)
+    Assert.Empty(result.GeneratedSources)
+
+[<Fact>]
+let ``source snapshot path mismatch fails generation`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let other = fileIn root "Other.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let project =
+        {
+            snapshot Library [ domain ] with
+                SourceFiles = immutableArray [ FSharpSourceFileSnapshot.create other "module Other" ]
+        }
+
+    let result = project |> runWith options (ImplementationGenerator("Generated", Prelude))
+
+    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+    Assert.Contains(domain, diagnostic.Message)
+    Assert.Contains(other, diagnostic.Message)
+    Assert.Empty(result.GeneratedSources)
+
+[<Fact>]
 let ``project cache identity changes when generated source changes`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"

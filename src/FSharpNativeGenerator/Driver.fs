@@ -131,6 +131,30 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
             let hasErrorDiagnostics () =
                 diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error)
 
+            let projectSourceFiles =
+                projectSnapshot.ProjectOptions.SourceFiles
+                |> Seq.map Path.GetFullPath
+                |> Seq.toList
+
+            let snapshotSourceFiles =
+                projectSnapshot.SourceFiles
+                |> Seq.map _.Path
+                |> Seq.map Path.GetFullPath
+                |> Seq.toList
+
+            if projectSourceFiles.Length <> snapshotSourceFiles.Length then
+                diagnostics.Add(Diagnostics.error "FSG0011" (sprintf "Project source file count %d does not match source snapshot count %d." projectSourceFiles.Length snapshotSourceFiles.Length))
+            else
+                let mismatch =
+                    List.zip projectSourceFiles snapshotSourceFiles
+                    |> List.tryFind (fun (projectPath, snapshotPath) -> not (String.Equals(projectPath, snapshotPath, StringComparison.OrdinalIgnoreCase)))
+
+                match mismatch with
+                | Some(projectPath, snapshotPath) ->
+                    diagnostics.Add(Diagnostics.error "FSG0011" (sprintf "Project source path '%s' does not match source snapshot path '%s'." projectPath snapshotPath))
+                | None ->
+                    ()
+
             if options.MaxGenerationPasses <> 1 then
                 diagnostics.Add(Diagnostics.error "FSG0010" "Fixed-point generation is not supported in V1. MaxGenerationPasses must be 1.")
 
