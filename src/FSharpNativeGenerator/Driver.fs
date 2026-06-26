@@ -227,12 +227,20 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
                         | ex ->
                             diagnostics.Add(Diagnostics.error "FSG0004" (sprintf "Generator '%s' threw during source output: %s" generator.GeneratorName ex.Message))
 
+            let skipFinalMaterialization = hasErrorDiagnostics ()
             let pending = (postInitializationPending |> Seq.toList) @ (sourcePending |> Seq.toList)
-            let materialized, materializeDiagnostics = updatedDriver.MaterializePending pending
+
+            let materialized, materializeDiagnostics =
+                if skipFinalMaterialization then
+                    postInitializationMaterialized, []
+                else
+                    updatedDriver.MaterializePending pending
+
             diagnostics.AddRange materializeDiagnostics
 
-            for diagnostic in materialized |> Seq.collect GeneratedSourceValidation.validate do
-                diagnostics.Add diagnostic
+            if not skipFinalMaterialization then
+                for diagnostic in materialized |> Seq.collect GeneratedSourceValidation.validate do
+                    diagnostics.Add diagnostic
 
             let originalSourcePathSet =
                 projectSnapshot.ProjectOptions.SourceFiles

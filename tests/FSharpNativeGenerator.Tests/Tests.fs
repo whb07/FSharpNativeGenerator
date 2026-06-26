@@ -476,6 +476,19 @@ type PostInitializationVisibleToSourceOutputGenerator() =
                 Action<FSharpSourceProductionContext, string>(fun productionContext hintName ->
                     productionContext.AddImplementationSource("Saw" + hintName, text ("module Saw" + hintName), Prelude)))
 
+[<FSharpGenerator>]
+type InvalidPostInitializationGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterPostInitializationOutput(
+                Action<FSharpPostInitializationContext>(fun postInitializationContext ->
+                    postInitializationContext.AddImplementationSource("InvalidPostInit", text "")))
+
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    productionContext.AddImplementationSource("ShouldNotRunAfterInvalidPostInit", text "module ShouldNotRunAfterInvalidPostInit", Prelude)))
+
 [<Fact>]
 let ``prelude source is inserted before original files and stored`` () =
     let root = tempRoot ()
@@ -799,6 +812,18 @@ let ``empty generated source reports generated file path`` () =
 
     let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0005" && diagnostic.FilePath.IsSome))
     Assert.Contains("Empty.fs", diagnostic.FilePath.Value)
+    Assert.Empty(result.GeneratedSources)
+
+[<Fact>]
+let ``invalid post initialization output reports once and skips source outputs`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let result = snapshot Library [ domain ] |> runWith options (InvalidPostInitializationGenerator())
+
+    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0005"))
+    Assert.Contains("InvalidPostInit.fs", diagnostic.FilePath.Value)
+    Assert.DoesNotContain(result.GeneratedSources, fun source -> source.HintName = "ShouldNotRunAfterInvalidPostInit")
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
