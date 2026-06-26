@@ -5,6 +5,7 @@ open System.Collections.Immutable
 open System.Collections.Generic
 open System.IO
 open System.Security.Cryptography
+open System.Threading
 
 module FSharpProjectCacheIdentity =
     let compute (snapshot: FSharpGeneratorProjectSnapshot) (generatedSources: seq<FSharpGeneratedSource>) =
@@ -65,7 +66,7 @@ module internal FSharpGeneratorRunCacheKey =
         |> Seq.sortBy fst
         |> Seq.collect (fun (key, value) -> seq { key; value })
 
-    let compute (generators: ImmutableArray<IFSharpIncrementalGenerator>) (options: FSharpGeneratorDriverOptions) (snapshot: FSharpGeneratorProjectSnapshot) =
+    let compute (generators: ImmutableArray<IFSharpIncrementalGenerator>) (options: FSharpGeneratorDriverOptions) (snapshot: FSharpGeneratorProjectSnapshot) (cancellationToken: CancellationToken) =
         seq {
             yield Hashing.toHex (FSharpGeneratorDriverIdentity.compute generators options)
             yield snapshot.ProjectOptions.ProjectFilePath
@@ -85,7 +86,12 @@ module internal FSharpGeneratorRunCacheKey =
 
                 match additionalText.Checksum with
                 | Some checksum -> yield Hashing.toHex checksum
-                | None -> yield "<missing>"
+                | None ->
+                    cancellationToken.ThrowIfCancellationRequested()
+
+                    match additionalText.GetText cancellationToken with
+                    | Some sourceText -> yield Hashing.toHex (FSharpSourceText.checksum sourceText)
+                    | None -> yield "<missing>"
 
             yield! dictionaryParts snapshot.AnalyzerConfigOptions.GlobalOptions
 

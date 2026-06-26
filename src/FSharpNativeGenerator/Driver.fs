@@ -169,7 +169,7 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
 
         let stopwatch = Stopwatch.StartNew()
         let updatedDriver, initializedGenerators = this.InitializeGenerators()
-        let cacheKey = FSharpGeneratorRunCacheKey.compute generators options projectSnapshot |> Hashing.toHex
+        let cacheKey = FSharpGeneratorRunCacheKey.compute generators options projectSnapshot cancellationToken |> Hashing.toHex
 
         let runFresh () =
             let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
