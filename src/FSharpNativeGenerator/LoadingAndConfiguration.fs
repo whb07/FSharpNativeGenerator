@@ -53,7 +53,7 @@ module FSharpGeneratorAssemblyLoader =
             let loadContext = GeneratorAssemblyLoadContext(path)
             let assembly = loadContext.LoadFromAssemblyPath(Path.GetFullPath(path))
 
-            for candidate in assembly.GetTypes() do
+            for candidate in assembly.GetTypes() |> Array.sortBy _.FullName do
                 let hasInterface = implementsGenerator candidate
 
                 match FSharpGeneratorAttributeHelpers.tryGet candidate, hasInterface with

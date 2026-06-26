@@ -2131,6 +2131,22 @@ let ``assembly loader discovers attributed parameterless generators`` () =
     )
 
 [<Fact>]
+let ``assembly loader returns generators in deterministic type-name order`` () =
+    let assemblyPath = Assembly.GetExecutingAssembly().Location
+    let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
+
+    let generatorTypeNames =
+        result.Generators
+        |> Seq.map (fun generator -> generator.GetType().FullName)
+        |> Seq.toArray
+
+    Assert.Equal<string array>(
+        generatorTypeNames
+        |> Array.sortWith (fun left right -> StringComparer.Ordinal.Compare(left, right)),
+        generatorTypeNames
+    )
+
+[<Fact>]
 let ``assembly loader reports attributed type without generator interface`` () =
     let assemblyPath = Assembly.GetExecutingAssembly().Location
     let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
