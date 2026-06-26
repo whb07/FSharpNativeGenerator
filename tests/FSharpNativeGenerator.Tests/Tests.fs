@@ -2952,6 +2952,20 @@ let ``MSBuild source generator item loads generator assembly`` () =
     )
 
 [<Fact>]
+let ``MSBuild configuration trims boolean property values`` () =
+    let result =
+        FSharpSourceGeneratorConfiguration.fromMSBuildItems
+            []
+            []
+            []
+            { EmitFSharpGeneratedFiles = Some " true "
+              FSharpGeneratedFilesOutputPath = None
+              FSharpSourceGeneratorReportPath = None }
+
+    Assert.Empty(result.Diagnostics)
+    Assert.True(result.Configuration.DriverOptions.EmitGeneratedFiles)
+
+[<Fact>]
 let ``MSBuild configuration reports invalid boolean property`` () =
     let result =
         FSharpSourceGeneratorConfiguration.fromMSBuildItems

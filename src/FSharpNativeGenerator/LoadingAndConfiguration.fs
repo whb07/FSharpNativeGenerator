@@ -370,10 +370,17 @@ module FSharpSourceGeneratorConfiguration =
         let parseBoolOption (value: string option) =
             match value with
             | None -> None
-            | Some text when text.Equals("true", StringComparison.OrdinalIgnoreCase) -> Some true
-            | Some text when text.Equals("false", StringComparison.OrdinalIgnoreCase) -> Some false
-            | Some text when text.Equals("", StringComparison.Ordinal) -> None
-            | Some _ -> None
+            | Some text ->
+                let trimmed = text.Trim()
+
+                if trimmed.Equals("true", StringComparison.OrdinalIgnoreCase) then
+                    Some true
+                elif trimmed.Equals("false", StringComparison.OrdinalIgnoreCase) then
+                    Some false
+                elif trimmed.Equals("", StringComparison.Ordinal) then
+                    None
+                else
+                    None
 
         let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
 
