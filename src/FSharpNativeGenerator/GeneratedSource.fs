@@ -173,6 +173,24 @@ module internal Placement =
                     else
                         diagnostics.Add(Diagnostics.error "FSG0008" (sprintf "Generated signature '%s' references missing implementation companion '%s'." pendingSignature.HintName companionHint))
 
+        let duplicateSignatureCompanions =
+            pending
+            |> List.choose (fun source ->
+                match source.Kind, source.CompanionImplementationHintName with
+                | Signature, Some companion -> Some((source.GeneratorName, companion), source.HintName)
+                | _ -> None)
+            |> Seq.groupBy fst
+            |> Seq.choose (fun ((generatorName, companion), signatures) ->
+                let signatureHintNames = signatures |> Seq.map snd |> Seq.toList
+
+                if signatureHintNames.Length > 1 then
+                    Some(generatorName, companion, signatureHintNames)
+                else
+                    None)
+
+        for (generatorName, companion, signatureHintNames) in duplicateSignatureCompanions do
+            diagnostics.Add(Diagnostics.error "FSG0008" (sprintf "Generator '%s' emitted multiple generated signatures for implementation companion '%s': %s." generatorName companion (String.concat ", " signatureHintNames)))
+
         let signatureCompanionHints =
             pending
             |> List.choose (fun source ->

@@ -186,6 +186,17 @@ type SignaturePairGenerator(placement: FSharpGeneratedSourcePlacement) =
                     productionContext.AddImplementationSource("Client", text "module Generated.Client", placement)))
 
 [<FSharpGenerator>]
+type MultipleSignatureCompanionsGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    productionContext.AddSignatureSource("ClientSigA", text "module Generated.Client\nval value: int", "Client", Prelude)
+                    productionContext.AddSignatureSource("ClientSigB", text "module Generated.Client\nval value: int", "Client", Prelude)
+                    productionContext.AddImplementationSource("Client", text "module Generated.Client\nlet value = 1", Prelude)))
+
+[<FSharpGenerator>]
 type MissingSignatureCompanionGenerator() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
@@ -670,6 +681,19 @@ let ``generated signature companion is placed before implementation`` () =
     Assert.Equal(Implementation, result.GeneratedSources.[1].Kind)
     Assert.Equal(result.GeneratedSources.[0].ResolvedPath, result.UpdatedSourceFiles.[0])
     Assert.Equal(result.GeneratedSources.[1].ResolvedPath, result.UpdatedSourceFiles.[1])
+
+[<Fact>]
+let ``multiple generated signatures for one implementation fail`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let result = snapshot Library [ domain ] |> runWith options (MultipleSignatureCompanionsGenerator())
+
+    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0008"))
+    Assert.Contains("multiple generated signatures", diagnostic.Message)
+    Assert.Contains("ClientSigA", diagnostic.Message)
+    Assert.Contains("ClientSigB", diagnostic.Message)
+    Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
 let ``generated signature with missing companion fails`` () =
