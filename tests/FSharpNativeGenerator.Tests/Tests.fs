@@ -1579,6 +1579,34 @@ let ``project cache identity changes when generated source changes`` () =
     Assert.NotEqual<byte seq>(identityA, identityB)
 
 [<Fact>]
+let ``project cache identity changes when generated source order changes`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project = snapshot Library [ domain ]
+
+    let driver =
+        FSharpGeneratorDriver.Create(
+            [ ImplementationGenerator("First", Prelude)
+              ImplementationGenerator("Second", Prelude) ],
+            options
+        )
+
+    let _, result = driver.RunGenerators(project, CancellationToken.None)
+
+    let identityA = FSharpProjectCacheIdentity.compute project result.GeneratedSources
+
+    let identityB =
+        FSharpProjectCacheIdentity.compute project (result.GeneratedSources |> Seq.rev)
+
+    Assert.Empty(result.Diagnostics)
+    Assert.NotEqual<byte seq>(identityA, identityB)
+
+[<Fact>]
 let ``RunGeneratorsAndUpdateProjectOptions updates source files and stamp`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
