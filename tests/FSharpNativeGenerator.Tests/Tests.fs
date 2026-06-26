@@ -928,6 +928,37 @@ let ``generated file anchors resolve against generated sources`` () =
     Assert.Equal<IReadOnlyList<string>>(immutableArray [ pathA; pathC; pathB; domain ], result.UpdatedSourceFiles)
 
 [<Fact>]
+let ``multiple before file placements preserve generator order`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let program = fileIn root "Program.fs"
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let driver =
+        FSharpGeneratorDriver.Create(
+            [ ImplementationGenerator("FirstBefore", BeforeFile program)
+              ImplementationGenerator("SecondBefore", BeforeFile program) ],
+            options
+        )
+
+    let _, result =
+        driver.RunGenerators(snapshot Application [ domain; program ], CancellationToken.None)
+
+    Assert.Empty(result.Diagnostics)
+
+    Assert.Equal<IReadOnlyList<string>>(
+        immutableArray
+            [ domain
+              result.GeneratedSources.[0].ResolvedPath
+              result.GeneratedSources.[1].ResolvedPath
+              program ],
+        result.UpdatedSourceFiles
+    )
+
+[<Fact>]
 let ``before last source preserves application final file`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
