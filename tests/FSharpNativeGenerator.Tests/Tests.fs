@@ -1965,6 +1965,35 @@ let ``additional text content invalidates cache when checksum is unavailable`` (
     Assert.Equal(2, counter.Value)
 
 [<Fact>]
+let ``additional text null content participates in cache identity without crashing`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let schema = fileIn root "schema.json"
+    let counter = ref 0
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project =
+        { snapshot Library [ domain ] with
+            AdditionalTexts =
+                immutableArray
+                    [ { Path = schema
+                        GetText = fun _ -> Some(Unchecked.defaultof<FSharpSourceText>)
+                        Checksum = None } ] }
+
+    let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
+
+    let updatedDriver, first = driver.RunGenerators(project, CancellationToken.None)
+    let _, second = updatedDriver.RunGenerators(project, CancellationToken.None)
+
+    Assert.Empty(first.Diagnostics)
+    Assert.False(first.CacheHit)
+    Assert.True(second.CacheHit)
+    Assert.Equal(1, counter.Value)
+
+[<Fact>]
 let ``analyzer config option change invalidates cached result`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"

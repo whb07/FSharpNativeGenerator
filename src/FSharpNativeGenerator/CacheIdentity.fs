@@ -89,7 +89,9 @@ module internal CacheIdentityParts =
                 cancellationToken.ThrowIfCancellationRequested()
 
                 match additionalText.GetText cancellationToken with
-                | Some sourceText -> yield Hashing.toHex (FSharpSourceText.checksum sourceText)
+                | Some sourceText when not (obj.ReferenceEquals(sourceText, null)) ->
+                    yield Hashing.toHex (FSharpSourceText.checksum sourceText)
+                | Some _ -> yield "<null>"
                 | None -> yield "<missing>"
         }
 
