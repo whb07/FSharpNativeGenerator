@@ -66,6 +66,10 @@ module FSharpGeneratorAssemblyLoader =
                         diagnostics.Add(
                             error "FSG0002" (sprintf "Generator type '%s' must not be abstract." candidate.FullName)
                         )
+                    elif candidate.ContainsGenericParameters then
+                        diagnostics.Add(
+                            error "FSG0002" (sprintf "Generator type '%s' must not be generic." candidate.FullName)
+                        )
                     elif not (FSharpGeneratorAttributeHelpers.isSupportedApiVersion generatorAttribute) then
                         diagnostics.Add(
                             error

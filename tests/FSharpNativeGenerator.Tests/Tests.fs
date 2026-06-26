@@ -409,6 +409,11 @@ type private PrivateAttributedGenerator() =
         member _.Initialize _ = ()
 
 [<FSharpGenerator>]
+type GenericAttributedGenerator<'T>() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize _ = ()
+
+[<FSharpGenerator>]
 type AdditionalTextGenerator() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
@@ -2161,6 +2166,19 @@ let ``assembly loader reports private attributed generator type`` () =
             diagnostic.Id = "FSG0002"
             && diagnostic.Message.Contains("PrivateAttributedGenerator", StringComparison.Ordinal)
             && diagnostic.Message.Contains("public", StringComparison.OrdinalIgnoreCase))
+    )
+
+[<Fact>]
+let ``assembly loader reports generic attributed generator type`` () =
+    let assemblyPath = Assembly.GetExecutingAssembly().Location
+    let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
+
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic ->
+            diagnostic.Id = "FSG0002"
+            && diagnostic.Message.Contains("GenericAttributedGenerator", StringComparison.Ordinal)
+            && diagnostic.Message.Contains("generic", StringComparison.OrdinalIgnoreCase))
     )
 
 [<Fact>]
