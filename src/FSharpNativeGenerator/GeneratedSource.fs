@@ -70,11 +70,12 @@ module internal RunReport =
           Placement = string source.Placement
           Checksum = Hashing.toHex source.Checksum }
 
-    let private diagnosticReport (diagnostic: FSharpGeneratorDiagnostic) =
+    let private diagnosticReport (diagnostic: FSharpGeneratorDiagnostic) : FSharpGeneratorDiagnosticReport =
         { Id = diagnostic.Id
           Message = diagnostic.Message
           Severity = string diagnostic.Severity
-          FilePath = diagnostic.FilePath }
+          FilePath = diagnostic.FilePath
+          Range = diagnostic.Range }
 
     let write path (result: FSharpGeneratorDriverRunResult) =
         let report =
@@ -191,11 +192,14 @@ module internal GeneratedSourceValidation =
         |> Async.RunSynchronously
         |> _.Diagnostics
         |> Seq.map (fun diagnostic ->
-            { Id = "FSG0005"
-              Message = sprintf "Generated source '%s' parse failed: %s" source.HintName diagnostic.Message
-              Severity = diagnosticSeverity diagnostic.Severity
-              Range = diagnosticRange diagnostic
-              FilePath = Some source.ResolvedPath })
+            let generatorDiagnostic: FSharpGeneratorDiagnostic =
+                { Id = "FSG0005"
+                  Message = sprintf "Generated source '%s' parse failed: %s" source.HintName diagnostic.Message
+                  Severity = diagnosticSeverity diagnostic.Severity
+                  Range = diagnosticRange diagnostic
+                  FilePath = Some source.ResolvedPath }
+
+            generatorDiagnostic)
 
     let validate
         (projectOptions: FSharp.Compiler.SourceGeneration.FSharpProjectOptions)

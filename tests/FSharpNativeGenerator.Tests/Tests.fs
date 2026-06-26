@@ -2403,6 +2403,33 @@ let ``report path writes generated source and diagnostic summary`` () =
     Assert.Equal(result.GeneratedSources.[0].ResolvedPath, firstGeneratedSource.GetProperty("ResolvedPath").GetString())
 
 [<Fact>]
+let ``report path writes diagnostic ranges`` () =
+    let root = tempRoot ()
+    let reportPath = fileIn root "reports/generator.json"
+    let domain = fileIn root "Domain.fs"
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated"
+            ReportPath = Some reportPath }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (InvalidSourceGenerator("BrokenSyntax", "module BrokenSyntax\nlet value ="))
+
+    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Range.IsSome))
+    Assert.True(File.Exists(reportPath), reportPath)
+
+    use report = JsonDocument.Parse(File.ReadAllText(reportPath))
+    let diagnostics = report.RootElement.GetProperty("Diagnostics")
+    let firstDiagnostic = diagnostics[0]
+    let range = firstDiagnostic.GetProperty("Range")
+
+    Assert.Equal("FSG0005", firstDiagnostic.GetProperty("Id").GetString())
+    Assert.True(range.GetProperty("StartLine").GetInt32() > 0)
+    Assert.True(range.GetProperty("StartColumn").GetInt32() >= 0)
+
+[<Fact>]
 let ``report path is updated for cached generator runs`` () =
     let root = tempRoot ()
     let reportPath = fileIn root "reports/generator.json"

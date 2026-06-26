@@ -274,7 +274,8 @@ type FSharpGeneratorDiagnosticReport =
     { Id: string
       Message: string
       Severity: string
-      FilePath: string option }
+      FilePath: string option
+      Range: SourceRange option }
 
 type FSharpGeneratorRunReport =
     { GeneratedSources: ImmutableArray<FSharpGeneratedSourceReport>
