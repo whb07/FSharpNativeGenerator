@@ -210,6 +210,15 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
             for diagnostic in materialized |> Seq.collect GeneratedSourceValidation.validate do
                 diagnostics.Add diagnostic
 
+            let originalSourcePathSet =
+                projectSnapshot.ProjectOptions.SourceFiles
+                |> Seq.map (fun path -> Path.GetFullPath(path).ToUpperInvariant())
+                |> Set.ofSeq
+
+            for source in materialized do
+                if originalSourcePathSet.Contains(Path.GetFullPath(source.ResolvedPath).ToUpperInvariant()) then
+                    diagnostics.Add(Diagnostics.error "FSG0011" (sprintf "Generated source '%s' resolves to original source path '%s'." source.HintName source.ResolvedPath))
+
             let originalImplementationHints =
                 projectSnapshot.ProjectOptions.SourceFiles
                 |> Seq.filter (fun path -> path.EndsWith(".fs", StringComparison.OrdinalIgnoreCase))

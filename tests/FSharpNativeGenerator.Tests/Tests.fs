@@ -633,6 +633,20 @@ let ``duplicate resolved generated paths fail generation`` () =
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
+let ``generated path colliding with original source fails generation`` () =
+    let root = tempRoot ()
+    let generatedRoot = fileIn root "generated"
+    let collidingSource = generatedPath generatedRoot typeof<ImplementationGenerator> Implementation "Collides"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = generatedRoot }
+    let result = snapshot Library [ collidingSource ] |> runWith options (ImplementationGenerator("Collides", Prelude))
+
+    let diagnostic = Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+    Assert.Contains("Collides", diagnostic.Message)
+    Assert.Contains(collidingSource, diagnostic.Message)
+    Assert.Empty(result.GeneratedSources)
+    Assert.Equal<string array>([| collidingSource |], result.UpdatedSourceFiles |> Seq.toArray)
+
+[<Fact>]
 let ``missing anchor fails generation`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
