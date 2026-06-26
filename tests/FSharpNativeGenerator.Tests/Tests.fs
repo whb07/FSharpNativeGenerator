@@ -1074,6 +1074,41 @@ let ``analyzer config option change invalidates cached result`` () =
     Assert.Equal(2, counter.Value)
 
 [<Fact>]
+let ``additional text analyzer config option change invalidates cached result`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let schema = fileIn root "schema.json"
+    let mode = ref "A"
+    let counter = ref 0
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let baseProject = snapshotWithAdditional Library [ domain ] [ schema, """{"name":"Customer"}""" ]
+    let project =
+        {
+            baseProject with
+                AnalyzerConfigOptions =
+                    {
+                        GlobalOptions = Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
+                        GetOptionsForPath =
+                            fun path ->
+                                let values = Dictionary<string, string>()
+
+                                if String.Equals(Path.GetFullPath path, schema, StringComparison.OrdinalIgnoreCase) then
+                                    values["build_metadata.Mode"] <- mode.Value
+
+                                values :> IReadOnlyDictionary<string, string>
+                    }
+        }
+    let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
+
+    let updatedDriver, first = driver.RunGenerators(project, CancellationToken.None)
+    mode.Value <- "B"
+    let _, second = updatedDriver.RunGenerators(project, CancellationToken.None)
+
+    Assert.False(first.CacheHit)
+    Assert.False(second.CacheHit)
+    Assert.Equal(2, counter.Value)
+
+[<Fact>]
 let ``generator assembly content change invalidates cached result`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"

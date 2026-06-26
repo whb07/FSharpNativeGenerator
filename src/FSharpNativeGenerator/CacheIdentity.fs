@@ -98,5 +98,9 @@ module internal FSharpGeneratorRunCacheKey =
             for sourceFile in snapshot.SourceFiles do
                 yield sourceFile.Path
                 yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath sourceFile.Path |> dictionaryParts
+
+            for additionalText in snapshot.AdditionalTexts do
+                yield additionalText.Path
+                yield! snapshot.AnalyzerConfigOptions.GetOptionsForPath additionalText.Path |> dictionaryParts
         }
         |> Hashing.sha256Many
