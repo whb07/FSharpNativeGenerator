@@ -39,6 +39,9 @@ module internal GeneratedPaths =
         else
             cleaned
 
+    let hasHintBaseName (hintName: string) =
+        not (String.IsNullOrWhiteSpace(stripKnownExtension hintName))
+
     let extensionFor =
         function
         | Implementation -> ".fs"

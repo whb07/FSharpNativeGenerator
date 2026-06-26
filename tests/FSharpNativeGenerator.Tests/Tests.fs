@@ -1536,6 +1536,28 @@ let ``implementation hint with fsi extension is rejected`` () =
 
     Assert.True(hasDiagnostic "FSG0013" result)
 
+[<Theory>]
+[<InlineData(".fs")>]
+[<InlineData(".fsi")>]
+[<InlineData("   .fs")>]
+let ``extension only generated hint name is rejected`` hintName =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let result =
+        snapshot Library [ domain ]
+        |> runWith options (ImplementationGenerator(hintName, Prelude))
+
+    let diagnostic =
+        Assert.Single(result.Diagnostics |> Seq.filter (fun diagnostic -> diagnostic.Id = "FSG0011"))
+
+    Assert.Contains("base name", diagnostic.Message, StringComparison.OrdinalIgnoreCase)
+    Assert.Empty(result.GeneratedSources)
+
 [<Fact>]
 let ``empty generated source reports generated file path`` () =
     let root = tempRoot ()

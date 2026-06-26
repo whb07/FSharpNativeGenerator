@@ -197,6 +197,17 @@ type FSharpGeneratorDriver
                     )
 
                     None
+                elif not (GeneratedPaths.hasHintBaseName source.HintName) then
+                    diagnostics.Add(
+                        Diagnostics.error
+                            "FSG0011"
+                            (sprintf
+                                "Generator '%s' emitted hint name '%s' without a generated source base name."
+                                source.GeneratorName
+                                source.HintName)
+                    )
+
+                    None
                 elif GeneratedPaths.conflictsWithKind source.Kind source.HintName then
                     diagnostics.Add(
                         Diagnostics.error
