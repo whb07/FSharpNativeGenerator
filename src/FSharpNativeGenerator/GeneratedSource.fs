@@ -281,9 +281,20 @@ module internal Placement =
         let isOriginalImplementationHint hintName =
             originalImplementationHints.Contains(normalizedHint hintName)
 
+        let hasCompanionHint companionHint =
+            not (String.IsNullOrWhiteSpace companionHint)
+
         for pendingSignature in pending |> List.filter (fun source -> source.Kind = Signature) do
             match pendingSignature.CompanionImplementationHintName with
             | None ->
+                diagnostics.Add(
+                    Diagnostics.error
+                        "FSG0008"
+                        (sprintf
+                            "Generated signature '%s' does not specify a generated implementation companion."
+                            pendingSignature.HintName)
+                )
+            | Some companionHint when not (hasCompanionHint companionHint) ->
                 diagnostics.Add(
                     Diagnostics.error
                         "FSG0008"
@@ -321,7 +332,8 @@ module internal Placement =
             pending
             |> List.choose (fun source ->
                 match source.Kind, source.CompanionImplementationHintName with
-                | Signature, Some companion -> Some((source.GeneratorName, companion), source.HintName)
+                | Signature, Some companion when hasCompanionHint companion ->
+                    Some((source.GeneratorName, companion), source.HintName)
                 | _ -> None)
             |> Seq.groupBy fst
             |> Seq.choose (fun ((generatorName, companion), signatures) ->
@@ -347,7 +359,7 @@ module internal Placement =
             pending
             |> List.choose (fun source ->
                 match source.Kind, source.CompanionImplementationHintName with
-                | Signature, Some companion -> Some(source.GeneratorName, companion)
+                | Signature, Some companion when hasCompanionHint companion -> Some(source.GeneratorName, companion)
                 | _ -> None)
             |> Set.ofList
 
