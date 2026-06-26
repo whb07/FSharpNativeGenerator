@@ -125,45 +125,86 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
 
         let runFresh () =
             let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
-            let pending = ResizeArray<PendingGeneratedSource>()
+            let postInitializationPending = ResizeArray<PendingGeneratedSource>()
+            let sourcePending = ResizeArray<PendingGeneratedSource>()
+
+            let hasErrorDiagnostics () =
+                diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error)
 
             if options.MaxGenerationPasses <> 1 then
                 diagnostics.Add(Diagnostics.error "FSG0010" "Fixed-point generation is not supported in V1. MaxGenerationPasses must be 1.")
 
-            if not (diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error)) then
+            let runnableGenerators = ResizeArray<RegisteredGenerator>()
+
+            if not (hasErrorDiagnostics ()) then
                 for generator in initializedGenerators do
                     diagnostics.AddRange generator.InitializationDiagnostics
 
-                    if generator.InitializationDiagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
-                        ()
-                    else
-                        let postInitContext = FSharpPostInitializationContext(generator.GeneratorName, pending, diagnostics, cancellationToken)
+                    if not (generator.InitializationDiagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error)) then
+                        runnableGenerators.Add generator
 
-                        for output in generator.PostInitializationOutputs do
-                            cancellationToken.ThrowIfCancellationRequested()
+            if not (hasErrorDiagnostics ()) then
+                for generator in runnableGenerators do
+                    let postInitContext = FSharpPostInitializationContext(generator.GeneratorName, postInitializationPending, diagnostics, cancellationToken)
 
-                            try
-                                output.Invoke postInitContext
-                            with
-                            | :? OperationCanceledException ->
-                                reraise()
-                            | ex ->
-                                diagnostics.Add(Diagnostics.error "FSG0004" (sprintf "Generator '%s' threw during post-initialization output: %s" generator.GeneratorName ex.Message))
+                    for output in generator.PostInitializationOutputs do
+                        cancellationToken.ThrowIfCancellationRequested()
 
-                        let productionContext = FSharpSourceProductionContext(generator.GeneratorName, pending, diagnostics, cancellationToken)
+                        try
+                            output.Invoke postInitContext
+                        with
+                        | :? OperationCanceledException ->
+                            reraise()
+                        | ex ->
+                            diagnostics.Add(Diagnostics.error "FSG0004" (sprintf "Generator '%s' threw during post-initialization output: %s" generator.GeneratorName ex.Message))
 
-                        for output in generator.SourceOutputs do
-                            cancellationToken.ThrowIfCancellationRequested()
+            let postInitializationMaterialized, postInitializationMaterializeDiagnostics =
+                updatedDriver.MaterializePending(postInitializationPending |> Seq.toList)
 
-                            try
-                                output projectSnapshot productionContext
-                            with
-                            | :? OperationCanceledException ->
-                                reraise()
-                            | ex ->
-                                diagnostics.Add(Diagnostics.error "FSG0004" (sprintf "Generator '%s' threw during source output: %s" generator.GeneratorName ex.Message))
+            diagnostics.AddRange postInitializationMaterializeDiagnostics
 
-            let materialized, materializeDiagnostics = updatedDriver.MaterializePending(pending |> Seq.toList)
+            for diagnostic in postInitializationMaterialized |> Seq.collect GeneratedSourceValidation.validate do
+                diagnostics.Add diagnostic
+
+            let sourceOutputSnapshot =
+                if hasErrorDiagnostics () then
+                    projectSnapshot
+                else
+                    let postInitializationSourceFiles =
+                        postInitializationMaterialized
+                        |> List.map (fun source -> FSharpSourceFileSnapshot.createFromSourceText source.ResolvedPath source.SourceText)
+
+                    let sourceFiles =
+                        (postInitializationMaterialized |> List.map _.ResolvedPath)
+                        @ (projectSnapshot.ProjectOptions.SourceFiles |> Seq.toList)
+
+                    {
+                        projectSnapshot with
+                            ProjectOptions =
+                                {
+                                    projectSnapshot.ProjectOptions with
+                                        SourceFiles = ImmutableArray.CreateRange sourceFiles
+                                }
+                            SourceFiles = ImmutableArray.CreateRange(postInitializationSourceFiles @ (projectSnapshot.SourceFiles |> Seq.toList))
+                    }
+
+            if not (hasErrorDiagnostics ()) then
+                for generator in runnableGenerators do
+                    let productionContext = FSharpSourceProductionContext(generator.GeneratorName, sourcePending, diagnostics, cancellationToken)
+
+                    for output in generator.SourceOutputs do
+                        cancellationToken.ThrowIfCancellationRequested()
+
+                        try
+                            output sourceOutputSnapshot productionContext
+                        with
+                        | :? OperationCanceledException ->
+                            reraise()
+                        | ex ->
+                            diagnostics.Add(Diagnostics.error "FSG0004" (sprintf "Generator '%s' threw during source output: %s" generator.GeneratorName ex.Message))
+
+            let pending = (postInitializationPending |> Seq.toList) @ (sourcePending |> Seq.toList)
+            let materialized, materializeDiagnostics = updatedDriver.MaterializePending pending
             diagnostics.AddRange materializeDiagnostics
 
             for diagnostic in materialized |> Seq.collect GeneratedSourceValidation.validate do

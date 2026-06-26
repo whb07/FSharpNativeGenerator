@@ -415,6 +415,29 @@ type PostInitializationAttributeGenerator() =
                         "GeneratedMarkerAttribute",
                         text "namespace GeneratedSupport\n\nopen System\n\n[<AttributeUsage(AttributeTargets.All)>]\ntype GeneratedMarkerAttribute() =\n    inherit Attribute()")))
 
+[<FSharpGenerator>]
+type PostInitializationVisibleToSourceOutputGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterPostInitializationOutput(
+                Action<FSharpPostInitializationContext>(fun postInitializationContext ->
+                    postInitializationContext.AddImplementationSource("PostInitSupport", text "module PostInitSupport\nlet value = 1")))
+
+            let postInitSourceNames =
+                context.SourceFilesProvider
+                |> FSharpIncrementalValuesProvider.choose (fun sourceFile ->
+                    let hintName = Path.GetFileNameWithoutExtension(sourceFile.Path)
+
+                    if hintName = "PostInitSupport" then
+                        Some hintName
+                    else
+                        None)
+
+            context.RegisterSourceOutput(
+                postInitSourceNames,
+                Action<FSharpSourceProductionContext, string>(fun productionContext hintName ->
+                    productionContext.AddImplementationSource("Saw" + hintName, text ("module Saw" + hintName), Prelude)))
+
 [<Fact>]
 let ``prelude source is inserted before original files and stored`` () =
     let root = tempRoot ()
@@ -1144,6 +1167,18 @@ let ``post initialization generated attribute can be referenced from user source
     let exitCode, output = runDotnetBuild projectPath
     if exitCode <> 0 then
         failwith output
+
+[<Fact>]
+let ``source outputs can see post initialization generated sources`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let result = snapshot Library [ domain ] |> runWith options (PostInitializationVisibleToSourceOutputGenerator())
+    let hintNames = result.GeneratedSources |> Seq.map _.HintName |> Seq.toArray
+
+    Assert.Empty(result.Diagnostics)
+    Assert.Contains("PostInitSupport", hintNames)
+    Assert.Contains("SawPostInitSupport", hintNames)
 
 [<Fact>]
 let ``command line parser extracts generator options and preserves unrelated arguments`` () =
