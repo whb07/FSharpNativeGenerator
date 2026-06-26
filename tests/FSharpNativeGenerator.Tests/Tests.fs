@@ -247,6 +247,16 @@ type DuplicateHintGenerator() =
                     productionContext.AddImplementationSource("Dup", text "module B", Prelude)))
 
 [<FSharpGenerator>]
+type DuplicateResolvedPathGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
+                    productionContext.AddImplementationSource("Client", text "module Client", Prelude)
+                    productionContext.AddImplementationSource("Client.fs", text "module ClientFile", Prelude)))
+
+[<FSharpGenerator>]
 type NoOutputGeneratorA() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize _ =
@@ -463,6 +473,16 @@ let ``duplicate hint names fail generation`` () =
     let result = snapshot Library [ domain ] |> runWith options (DuplicateHintGenerator())
 
     Assert.True(hasDiagnostic "FSG0006" result)
+
+[<Fact>]
+let ``duplicate resolved generated paths fail generation`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    let result = snapshot Library [ domain ] |> runWith options (DuplicateResolvedPathGenerator())
+
+    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0006" && diagnostic.Message.Contains("Client.fs", StringComparison.OrdinalIgnoreCase)))
+    Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
 let ``missing anchor fails generation`` () =

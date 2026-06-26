@@ -76,28 +76,44 @@ type FSharpGeneratorDriver private (generators: ImmutableArray<IFSharpIncrementa
         for ((generatorName, hintName, _), _) in duplicateHints do
             diagnostics.Add(Diagnostics.error "FSG0006" (sprintf "Generator '%s' emitted duplicate hint name '%s'." generatorName hintName))
 
-        pending
-        |> List.choose (fun source ->
-            if String.IsNullOrWhiteSpace source.HintName then
-                diagnostics.Add(Diagnostics.error "FSG0011" (sprintf "Generator '%s' emitted an empty hint name." source.GeneratorName))
-                None
-            elif GeneratedPaths.conflictsWithKind source.Kind source.HintName then
-                diagnostics.Add(Diagnostics.error "FSG0013" (sprintf "Generated source '%s' kind does not match its file extension." source.HintName))
-                None
-            else
-                let resolvedPath =
-                    GeneratedPaths.resolvedPath options.GeneratedRoot source.GeneratorName source.Kind source.HintName
+        let materialized =
+            pending
+            |> List.choose (fun source ->
+                if String.IsNullOrWhiteSpace source.HintName then
+                    diagnostics.Add(Diagnostics.error "FSG0011" (sprintf "Generator '%s' emitted an empty hint name." source.GeneratorName))
+                    None
+                elif GeneratedPaths.conflictsWithKind source.Kind source.HintName then
+                    diagnostics.Add(Diagnostics.error "FSG0013" (sprintf "Generated source '%s' kind does not match its file extension." source.HintName))
+                    None
+                else
+                    let resolvedPath =
+                        GeneratedPaths.resolvedPath options.GeneratedRoot source.GeneratorName source.Kind source.HintName
 
-                Some
-                    {
-                        GeneratorName = source.GeneratorName
-                        HintName = source.HintName
-                        ResolvedPath = resolvedPath
-                        Kind = source.Kind
-                        SourceText = source.SourceText
-                        Placement = source.Placement
-                        Checksum = FSharpSourceText.checksum source.SourceText
-                    }),
+                    Some
+                        {
+                            GeneratorName = source.GeneratorName
+                            HintName = source.HintName
+                            ResolvedPath = resolvedPath
+                            Kind = source.Kind
+                            SourceText = source.SourceText
+                            Placement = source.Placement
+                            Checksum = FSharpSourceText.checksum source.SourceText
+                        })
+
+        let duplicatePaths =
+            materialized
+            |> Seq.groupBy (fun source -> Path.GetFullPath(source.ResolvedPath).ToUpperInvariant())
+            |> Seq.choose (fun (_, sources) ->
+                let sources = sources |> Seq.toList
+                if sources.Length > 1 then
+                    Some sources.Head.ResolvedPath
+                else
+                    None)
+
+        for resolvedPath in duplicatePaths do
+            diagnostics.Add(Diagnostics.error "FSG0006" (sprintf "Generated path '%s' is produced more than once." resolvedPath))
+
+        materialized,
         diagnostics |> Seq.toList
 
     member this.RunGenerators(projectSnapshot: FSharpGeneratorProjectSnapshot, cancellationToken: CancellationToken) =
