@@ -8,6 +8,60 @@ open System.Security.Cryptography
 open System.Threading
 
 module internal CacheIdentityParts =
+    let private fileContentHash location =
+        if String.IsNullOrWhiteSpace location || not (File.Exists location) then
+            "<missing>"
+        else
+            File.ReadAllBytes location |> SHA256.HashData |> Convert.ToHexString
+
+    let private projectDirectory (projectOptions: FSharpProjectOptions) =
+        let projectPath = Path.GetFullPath projectOptions.ProjectFilePath
+        let directory = Path.GetDirectoryName projectPath
+
+        if String.IsNullOrWhiteSpace directory then
+            Environment.CurrentDirectory
+        else
+            directory
+
+    let private normalizeProjectPath (projectOptions: FSharpProjectOptions) (path: string) =
+        let trimmedPath = path.Trim().Trim('"')
+
+        if Path.IsPathRooted trimmedPath then
+            Path.GetFullPath trimmedPath
+        else
+            Path.GetFullPath(Path.Combine(projectDirectory projectOptions, trimmedPath))
+
+    let private tryPrefixedValue (prefix: string) (value: string) =
+        if value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) then
+            let candidate = value.Substring(prefix.Length)
+
+            if String.IsNullOrWhiteSpace candidate then
+                None
+            else
+                Some candidate
+        else
+            None
+
+    let private referencePaths (projectOptions: FSharpProjectOptions) =
+        let rec loop remainingOptions paths =
+            match remainingOptions with
+            | [] -> List.rev paths
+            | option :: value :: tail when
+                String.Equals(option, "--reference", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(option, "-r", StringComparison.OrdinalIgnoreCase)
+                ->
+                loop tail (normalizeProjectPath projectOptions value :: paths)
+            | option :: tail ->
+                let referencePath =
+                    [ "--reference:"; "-r:"; "/reference:"; "/r:" ]
+                    |> List.tryPick (fun prefix -> tryPrefixedValue prefix option)
+
+                match referencePath with
+                | Some path -> loop tail (normalizeProjectPath projectOptions path :: paths)
+                | None -> loop tail paths
+
+        loop (projectOptions.OtherOptions |> Seq.toList) []
+
     let dictionaryParts (values: IReadOnlyDictionary<string, string>) =
         values
         |> Seq.map (fun pair -> pair.Key, pair.Value)
@@ -32,6 +86,21 @@ module internal CacheIdentityParts =
                 | None -> yield "<missing>"
         }
 
+    let compilerReferenceParts (projectOptions: FSharpProjectOptions) =
+        seq {
+            let fsharpCoreAssembly = typeof<unit>.Assembly
+            yield "fsharp-core"
+            yield fsharpCoreAssembly.Location
+            yield string fsharpCoreAssembly.ManifestModule.ModuleVersionId
+            yield fileContentHash fsharpCoreAssembly.Location
+
+            yield "references"
+
+            for referencePath in referencePaths projectOptions do
+                yield referencePath
+                yield fileContentHash referencePath
+        }
+
 module FSharpProjectCacheIdentity =
     let compute (snapshot: FSharpGeneratorProjectSnapshot) (generatedSources: seq<FSharpGeneratedSource>) =
         seq {
@@ -40,6 +109,7 @@ module FSharpProjectCacheIdentity =
             yield! snapshot.ProjectOptions.SourceFiles
             yield! snapshot.ProjectOptions.OtherOptions
             yield string snapshot.ProjectOptions.OutputKind
+            yield! CacheIdentityParts.compilerReferenceParts snapshot.ProjectOptions
 
             for sourceFile in snapshot.SourceFiles do
                 yield sourceFile.Path
@@ -119,6 +189,7 @@ module internal FSharpGeneratorRunCacheKey =
             yield! snapshot.ProjectOptions.OtherOptions
             yield string snapshot.ProjectOptions.OutputKind
             yield defaultArg snapshot.ProjectOptions.Stamp ""
+            yield! CacheIdentityParts.compilerReferenceParts snapshot.ProjectOptions
 
             for sourceFile in snapshot.SourceFiles do
                 yield sourceFile.Path

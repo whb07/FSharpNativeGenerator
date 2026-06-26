@@ -96,6 +96,12 @@ let private writeFile path (content: string) =
 
     File.WriteAllText(path, content)
 
+let private writeBytes path (content: byte array) =
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)))
+    |> ignore
+
+    File.WriteAllBytes(path, content)
+
 let private runDotnetBuild (projectPath: string) =
     let startInfo: ProcessStartInfo =
         ProcessStartInfo("dotnet", "build \"" + projectPath + "\" --nologo")
@@ -1494,6 +1500,32 @@ let ``source file order change invalidates cached result`` () =
     Assert.Equal(2, counter.Value)
 
 [<Fact>]
+let ``referenced assembly content change invalidates cached result`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let referencePath = fileIn root "Reference.dll"
+    let counter = ref 0
+
+    writeBytes referencePath [| 1uy; 2uy; 3uy |]
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project =
+        snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "--reference:" + referencePath ]
+
+    let driver = FSharpGeneratorDriver.Create([ CountingGenerator(counter) ], options)
+
+    let updatedDriver, first = driver.RunGenerators(project, CancellationToken.None)
+    writeBytes referencePath [| 4uy; 5uy; 6uy |]
+    let _, second = updatedDriver.RunGenerators(project, CancellationToken.None)
+
+    Assert.False(first.CacheHit)
+    Assert.False(second.CacheHit)
+    Assert.Equal(2, counter.Value)
+
+[<Fact>]
 let ``additional file checksum change invalidates cached result`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
@@ -1857,6 +1889,23 @@ let ``source file order change updates project cache identity`` () =
 
     let identityA = FSharpProjectCacheIdentity.compute snapshotA []
     let identityB = FSharpProjectCacheIdentity.compute snapshotB []
+
+    Assert.NotEqual<byte seq>(identityA, identityB)
+
+[<Fact>]
+let ``referenced assembly content change updates project cache identity`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let referencePath = fileIn root "Reference.dll"
+
+    writeBytes referencePath [| 1uy; 2uy; 3uy |]
+
+    let project =
+        snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "--reference"; referencePath ]
+
+    let identityA = FSharpProjectCacheIdentity.compute project []
+    writeBytes referencePath [| 4uy; 5uy; 6uy |]
+    let identityB = FSharpProjectCacheIdentity.compute project []
 
     Assert.NotEqual<byte seq>(identityA, identityB)
 
