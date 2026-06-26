@@ -1034,6 +1034,36 @@ let ``configuration loads generators from configured assembly paths`` () =
     Assert.Contains(loadResult.Generators, fun generator -> generator.GetType() = typeof<LoadableGenerator>)
 
 [<Fact>]
+let ``NuGet analyzer folder generator loads from analyzers dotnet fs`` () =
+    let root = tempRoot ()
+    let packageRoot = fileIn root "package"
+    let analyzerFolder = Path.Combine(packageRoot, "analyzers", "dotnet", "fs")
+    let sourceGeneratorAssembly =
+        Path.Combine(repoRoot (), "tests/FSharpNativeGenerator.TestGenerators/bin/Debug/net10.0/FSharpNativeGenerator.TestGenerators.dll")
+        |> Path.GetFullPath
+    let packagedGeneratorAssembly = Path.Combine(analyzerFolder, "FSharpNativeGenerator.TestGenerators.dll")
+
+    Directory.CreateDirectory(analyzerFolder) |> ignore
+    File.Copy(sourceGeneratorAssembly, packagedGeneratorAssembly)
+
+    let generatorPaths = FSharpSourceGeneratorConfiguration.generatorPathsFromNuGetPackage packageRoot
+    let loadResult = FSharpSourceGeneratorConfiguration.loadGeneratorsFromNuGetPackage packageRoot
+
+    Assert.Equal<string array>([| packagedGeneratorAssembly |], generatorPaths |> Seq.toArray)
+    Assert.Empty(loadResult.Diagnostics)
+    Assert.Single(loadResult.Generators) |> ignore
+
+[<Fact>]
+let ``NuGet analyzer folder loading reports missing fs analyzer folder`` () =
+    let root = tempRoot ()
+    let packageRoot = fileIn root "package"
+    Directory.CreateDirectory(packageRoot) |> ignore
+
+    let loadResult = FSharpSourceGeneratorConfiguration.loadGeneratorsFromNuGetPackage packageRoot
+
+    Assert.True(loadResult.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0001" && diagnostic.FilePath = Some packageRoot))
+
+[<Fact>]
 let ``CLI runs generators without MSBuild and prints updated source list`` () =
     let root = tempRoot ()
     let consumer = fileIn root "Consumer.fs"

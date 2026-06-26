@@ -291,3 +291,33 @@ module FSharpSourceGeneratorConfiguration =
             Generators = loadResults |> Seq.collect _.Generators |> ImmutableArray.CreateRange
             Diagnostics = loadResults |> Seq.collect _.Diagnostics |> ImmutableArray.CreateRange
         }
+
+    let generatorPathsFromNuGetPackage packageRoot =
+        let analyzerRoot = Path.Combine(Path.GetFullPath(packageRoot), "analyzers", "dotnet", "fs")
+
+        if Directory.Exists analyzerRoot then
+            Directory.EnumerateFiles(analyzerRoot, "*.dll", SearchOption.AllDirectories)
+            |> Seq.sort
+            |> ImmutableArray.CreateRange
+        else
+            ImmutableArray<string>.Empty
+
+    let loadGeneratorsFromNuGetPackage packageRoot =
+        let generatorPaths = generatorPathsFromNuGetPackage packageRoot
+
+        if generatorPaths.IsDefaultOrEmpty then
+            {
+                Generators = ImmutableArray<IFSharpIncrementalGenerator>.Empty
+                Diagnostics =
+                    ImmutableArray.Create(
+                        { error "FSG0001" (sprintf "NuGet analyzer folder '%s' does not contain F# generator assemblies." (Path.Combine(Path.GetFullPath(packageRoot), "analyzers", "dotnet", "fs"))) with
+                            FilePath = Some(Path.GetFullPath(packageRoot)) })
+            }
+        else
+            loadGenerators
+                {
+                    GeneratorPaths = generatorPaths
+                    AdditionalFilePaths = ImmutableArray<string>.Empty
+                    AnalyzerConfigPaths = ImmutableArray<string>.Empty
+                    DriverOptions = FSharpGeneratorDriverOptions.defaults
+                }
