@@ -2319,13 +2319,17 @@ let ``MSBuild configuration maps items and properties to driver options`` () =
     let root = tempRoot ()
     let generatorPath = fileIn root "Generator.dll"
     let additionalPath = fileIn root "schema.json"
+    let analyzerConfigPath = fileIn root ".globalconfig"
     let outputPath = fileIn root "obj/Generated/FSharp"
     let reportPath = fileIn root "generator-report.json"
+
+    writeFile analyzerConfigPath "build_property.GeneratedModuleName = ConfiguredPrelude"
 
     let result =
         FSharpSourceGeneratorConfiguration.fromMSBuildItems
             [ { Include = generatorPath } ]
             [ { Include = additionalPath } ]
+            [ { Include = analyzerConfigPath } ]
             { EmitFSharpGeneratedFiles = Some "true"
               FSharpGeneratedFilesOutputPath = Some outputPath
               FSharpSourceGeneratorReportPath = Some reportPath }
@@ -2333,10 +2337,17 @@ let ``MSBuild configuration maps items and properties to driver options`` () =
     Assert.Empty(result.Diagnostics)
     Assert.Equal(generatorPath, result.Configuration.GeneratorPaths.[0])
     Assert.Equal(additionalPath, result.Configuration.AdditionalFilePaths.[0])
+    Assert.Equal(analyzerConfigPath, result.Configuration.AnalyzerConfigPaths.[0])
     Assert.True(result.Configuration.DriverOptions.EmitGeneratedFiles)
     Assert.Equal(Some outputPath, result.Configuration.DriverOptions.GeneratedFilesOutputPath)
     Assert.Equal(Some reportPath, result.Configuration.DriverOptions.ReportPath)
     Assert.Equal(MSBuild, result.Configuration.DriverOptions.HostKind)
+
+    let analyzerConfigOptions =
+        FSharpSourceGeneratorConfiguration.analyzerConfigOptions result.Configuration
+
+    Assert.Empty(analyzerConfigOptions.Diagnostics)
+    Assert.Equal("ConfiguredPrelude", analyzerConfigOptions.Options.GlobalOptions["build_property.GeneratedModuleName"])
 
 [<Fact>]
 let ``MSBuild source generator item loads generator assembly`` () =
@@ -2350,6 +2361,7 @@ let ``MSBuild source generator item loads generator assembly`` () =
     let result =
         FSharpSourceGeneratorConfiguration.fromMSBuildItems
             [ { Include = generatorAssembly } ]
+            []
             []
             { EmitFSharpGeneratedFiles = None
               FSharpGeneratedFilesOutputPath = None
@@ -2370,6 +2382,7 @@ let ``MSBuild source generator item loads generator assembly`` () =
 let ``MSBuild configuration reports invalid boolean property`` () =
     let result =
         FSharpSourceGeneratorConfiguration.fromMSBuildItems
+            []
             []
             []
             { EmitFSharpGeneratedFiles = Some "sometimes"

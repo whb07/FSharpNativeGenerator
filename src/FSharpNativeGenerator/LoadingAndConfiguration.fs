@@ -266,6 +266,7 @@ module FSharpSourceGeneratorConfiguration =
     let fromMSBuildItems
         (generatorItems: seq<FSharpMSBuildSourceGeneratorItem>)
         (additionalFileItems: seq<FSharpMSBuildAdditionalFileItem>)
+        (analyzerConfigItems: seq<FSharpMSBuildAnalyzerConfigItem>)
         (properties: FSharpMSBuildSourceGeneratorProperties)
         =
         let parseBoolOption (value: string option) =
@@ -306,7 +307,11 @@ module FSharpSourceGeneratorConfiguration =
                 |> Seq.map _.Include
                 |> Seq.map normalizePath
                 |> ImmutableArray.CreateRange
-              AnalyzerConfigPaths = ImmutableArray<string>.Empty
+              AnalyzerConfigPaths =
+                analyzerConfigItems
+                |> Seq.map _.Include
+                |> Seq.map normalizePath
+                |> ImmutableArray.CreateRange
               DriverOptions =
                 { FSharpGeneratorDriverOptions.defaults with
                     EmitGeneratedFiles = emitGeneratedFiles

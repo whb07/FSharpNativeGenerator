@@ -298,6 +298,8 @@ type FSharpMSBuildSourceGeneratorItem = { Include: string }
 
 type FSharpMSBuildAdditionalFileItem = { Include: string }
 
+type FSharpMSBuildAnalyzerConfigItem = { Include: string }
+
 type FSharpMSBuildSourceGeneratorProperties =
     { EmitFSharpGeneratedFiles: string option
       FSharpGeneratedFilesOutputPath: string option
