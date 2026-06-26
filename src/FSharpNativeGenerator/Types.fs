@@ -113,16 +113,59 @@ type FSharpSourceFileSnapshot =
         IsSignatureFile: bool
     }
 
+type FSharpSourceFileSnapshotsLoadResult =
+    {
+        SourceFiles: ImmutableArray<FSharpSourceFileSnapshot>
+        Diagnostics: ImmutableArray<FSharpGeneratorDiagnostic>
+    }
+
 module FSharpSourceFileSnapshot =
-    let create path text =
+    let createFromSourceText path sourceText =
         let normalizedPath = Path.GetFullPath(path)
-        let sourceText = FSharpSourceText.OfString text
 
         {
             Path = normalizedPath
             SourceText = sourceText
             Checksum = FSharpSourceText.checksum sourceText
             IsSignatureFile = normalizedPath.EndsWith(".fsi", StringComparison.OrdinalIgnoreCase)
+        }
+
+    let create path text =
+        createFromSourceText path (FSharpSourceText.OfString text)
+
+    let tryLoad (tryGetGeneratedText: string -> FSharpSourceText option) path (cancellationToken: CancellationToken) =
+        cancellationToken.ThrowIfCancellationRequested()
+
+        match tryGetGeneratedText path with
+        | Some generatedText -> Some(createFromSourceText path generatedText)
+        | None ->
+            let fullPath = Path.GetFullPath(path)
+
+            if File.Exists fullPath then
+                File.ReadAllText fullPath
+                |> FSharpSourceText.OfString
+                |> createFromSourceText fullPath
+                |> Some
+            else
+                None
+
+    let loadProjectSourceFiles (projectOptions: FSharpProjectOptions) (tryGetGeneratedText: string -> FSharpSourceText option) (cancellationToken: CancellationToken) =
+        let sourceFiles = ResizeArray<FSharpSourceFileSnapshot>()
+        let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
+
+        for sourceFile in projectOptions.SourceFiles do
+            match tryLoad tryGetGeneratedText sourceFile cancellationToken with
+            | Some snapshot -> sourceFiles.Add snapshot
+            | None ->
+                diagnostics.Add
+                    {
+                        FSharpGeneratorDiagnostic.create "FSG0011" (sprintf "Source file '%s' could not be resolved from disk or generated source store." sourceFile) Error with
+                            FilePath = Some(Path.GetFullPath(sourceFile))
+                    }
+
+        {
+            SourceFiles = ImmutableArray.CreateRange sourceFiles
+            Diagnostics = ImmutableArray.CreateRange diagnostics
         }
 
 type FSharpAdditionalText =

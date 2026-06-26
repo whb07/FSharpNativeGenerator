@@ -421,6 +421,54 @@ let ``prelude source is inserted before original files and stored`` () =
     Assert.True(result.GeneratedSourceStore.TryGetText(result.GeneratedSources.[0].ResolvedPath).IsSome)
 
 [<Fact>]
+let ``updated source files resolve generated text from in-memory store`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let options = { FSharpGeneratorDriverOptions.defaults with GeneratedRoot = fileIn root "generated" }
+    writeFile domain "module Domain\nlet value = 1"
+
+    let project = snapshot Library [ domain ]
+    let result = project |> runWith options (ImplementationGenerator("GeneratedPrelude", Prelude))
+
+    let updatedProjectOptions =
+        {
+            project.ProjectOptions with
+                SourceFiles = result.UpdatedSourceFiles
+        }
+
+    let loadResult =
+        FSharpSourceFileSnapshot.loadProjectSourceFiles
+            updatedProjectOptions
+            result.GeneratedSourceStore.TryGetText
+            CancellationToken.None
+
+    Assert.Empty(result.Diagnostics)
+    Assert.False(File.Exists(result.GeneratedSources.[0].ResolvedPath))
+    Assert.Empty(loadResult.Diagnostics)
+    Assert.Equal(result.UpdatedSourceFiles.Length, loadResult.SourceFiles.Length)
+    Assert.Equal(result.GeneratedSources.[0].ResolvedPath, loadResult.SourceFiles.[0].Path)
+    Assert.Contains("module Generated", loadResult.SourceFiles.[0].SourceText.Text)
+    Assert.Equal(domain, loadResult.SourceFiles.[1].Path)
+    Assert.Contains("module Domain", loadResult.SourceFiles.[1].SourceText.Text)
+
+[<Fact>]
+let ``source snapshot loading reports unresolved paths`` () =
+    let root = tempRoot ()
+    let missing = fileIn root "Missing.fs"
+    let project = snapshot Library [ missing ]
+
+    let loadResult =
+        FSharpSourceFileSnapshot.loadProjectSourceFiles
+            project.ProjectOptions
+            (fun _ -> None)
+            CancellationToken.None
+
+    let diagnostic = Assert.Single(loadResult.Diagnostics)
+    Assert.Equal("FSG0011", diagnostic.Id)
+    Assert.Equal(Some missing, diagnostic.FilePath)
+    Assert.Empty(loadResult.SourceFiles)
+
+[<Fact>]
 let ``after file placement inserts generated source before later consumers`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
