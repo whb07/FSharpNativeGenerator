@@ -358,6 +358,16 @@ type BuildHarnessSignaturePairGenerator() =
                     productionContext.AddSignatureSource("GeneratedContract", text "module GeneratedContract\nval answer: int", "GeneratedContract", Prelude)
                     productionContext.AddImplementationSource("GeneratedContract", text "module GeneratedContract\nlet answer = 42", Prelude)))
 
+[<FSharpGenerator>]
+type PostInitializationAttributeGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterPostInitializationOutput(
+                Action<FSharpPostInitializationContext>(fun postInitializationContext ->
+                    postInitializationContext.AddImplementationSource(
+                        "GeneratedMarkerAttribute",
+                        text "namespace GeneratedSupport\n\nopen System\n\n[<AttributeUsage(AttributeTargets.All)>]\ntype GeneratedMarkerAttribute() =\n    inherit Attribute()")))
+
 [<Fact>]
 let ``prelude source is inserted before original files and stored`` () =
     let root = tempRoot ()
@@ -830,6 +840,35 @@ let ``generated signature and implementation pair builds in resolved order`` () 
     Assert.Empty(result.Diagnostics)
     Assert.Equal(Signature, result.GeneratedSources.[0].Kind)
     Assert.Equal(Implementation, result.GeneratedSources.[1].Kind)
+    writeFSharpProject projectPath result.UpdatedSourceFiles
+
+    let exitCode, output = runDotnetBuild projectPath
+    if exitCode <> 0 then
+        failwith output
+
+[<Fact>]
+let ``post initialization generated attribute can be referenced from user source`` () =
+    let root = tempRoot ()
+    let generatedRoot = fileIn root "generated"
+    let projectPath = fileIn root "Harness.fsproj"
+    let consumer = fileIn root "Consumer.fs"
+
+    writeFile consumer "module Consumer\n\n[<GeneratedSupport.GeneratedMarker>]\nlet value = 42"
+
+    let options =
+        {
+            FSharpGeneratorDriverOptions.defaults with
+                GeneratedRoot = generatedRoot
+                EmitGeneratedFiles = true
+                GeneratedFilesOutputPath = Some generatedRoot
+        }
+
+    let result = snapshot Library [ consumer ] |> runWith options (PostInitializationAttributeGenerator())
+
+    Assert.Empty(result.Diagnostics)
+    let generatedSource = Assert.Single(result.GeneratedSources)
+    Assert.Equal("GeneratedMarkerAttribute", generatedSource.HintName)
+    Assert.Equal(result.GeneratedSources.[0].ResolvedPath, result.UpdatedSourceFiles.[0])
     writeFSharpProject projectPath result.UpdatedSourceFiles
 
     let exitCode, output = runDotnetBuild projectPath
