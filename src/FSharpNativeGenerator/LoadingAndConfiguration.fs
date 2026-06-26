@@ -213,11 +213,19 @@ module FSharpSourceGeneratorConfiguration =
         tokens |> Seq.toList
 
     let private expandResponseFiles (diagnostics: ResizeArray<FSharpGeneratorDiagnostic>) (arguments: seq<string>) =
-        let rec expand (seen: Set<string>) (argumentsToExpand: string list) =
+        let responsePathFromBase baseDirectory (argument: string) =
+            let path = argument.Substring 1
+
+            if Path.IsPathRooted path then
+                normalizePath path
+            else
+                Path.Combine(baseDirectory, path) |> normalizePath
+
+        let rec expand (baseDirectory: string) (seen: Set<string>) (argumentsToExpand: string list) =
             argumentsToExpand
             |> List.collect (fun argument ->
                 if argument.StartsWith("@", StringComparison.Ordinal) && argument.Length > 1 then
-                    let responsePath = normalizePath (argument.Substring 1)
+                    let responsePath = responsePathFromBase baseDirectory argument
 
                     if seen |> Set.contains responsePath then
                         diagnostics.Add(
@@ -233,13 +241,15 @@ module FSharpSourceGeneratorConfiguration =
 
                         []
                     else
+                        let responseDirectory = Path.GetDirectoryName responsePath
+
                         File.ReadAllText responsePath
                         |> tokenizeResponseFile
-                        |> expand (seen |> Set.add responsePath)
+                        |> expand responseDirectory (seen |> Set.add responsePath)
                 else
                     [ argument ])
 
-        arguments |> Seq.toList |> expand Set.empty
+        arguments |> Seq.toList |> expand Environment.CurrentDirectory Set.empty
 
     let parseCommandLineArguments (arguments: seq<string>) =
         let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()

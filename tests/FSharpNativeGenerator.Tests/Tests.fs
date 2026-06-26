@@ -2560,6 +2560,23 @@ let ``command line parser expands response files`` () =
     Assert.Equal(Some outputPath, result.Configuration.DriverOptions.GeneratedFilesOutputPath)
 
 [<Fact>]
+let ``command line parser resolves nested response files relative to parent response file`` () =
+    let root = tempRoot ()
+    let responseRoot = fileIn root "responses"
+    let generatorPath = fileIn root "Generator.dll"
+    let parentResponsePath = Path.Combine(responseRoot, "parent.rsp")
+    let childResponsePath = Path.Combine(responseRoot, "child.rsp")
+
+    writeFile parentResponsePath "@child.rsp"
+    writeFile childResponsePath ("--fsharp-source-generator \"" + generatorPath + "\"")
+
+    let result =
+        FSharpSourceGeneratorConfiguration.parseCommandLineArguments [ "@" + parentResponsePath ]
+
+    Assert.Empty(result.Diagnostics)
+    Assert.Equal(generatorPath, result.Configuration.GeneratorPaths.[0])
+
+[<Fact>]
 let ``command line parser reports missing response files`` () =
     let root = tempRoot ()
     let responsePath = fileIn root "missing.rsp"
