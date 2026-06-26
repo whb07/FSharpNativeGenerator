@@ -39,8 +39,8 @@ module FSharpGeneratorAssemblyLoader =
                         && AssemblyName.ReferenceMatchesDefinition(assemblyName, assembly.GetName()))
                     |> Option.defaultValue null
 
-    let private isPublicConcrete (candidate: Type) =
-        (candidate.IsPublic || candidate.IsNestedPublic) && not candidate.IsAbstract
+    let private hasPublicVisibility (candidate: Type) =
+        candidate.IsPublic || candidate.IsNestedPublic
 
     let private implementsGenerator (candidate: Type) =
         typeof<IFSharpIncrementalGenerator>.IsAssignableFrom(candidate)
@@ -53,12 +53,16 @@ module FSharpGeneratorAssemblyLoader =
             let loadContext = GeneratorAssemblyLoadContext(path)
             let assembly = loadContext.LoadFromAssemblyPath(Path.GetFullPath(path))
 
-            for candidate in assembly.GetTypes() |> Array.filter isPublicConcrete do
+            for candidate in assembly.GetTypes() do
                 let hasInterface = implementsGenerator candidate
 
                 match FSharpGeneratorAttributeHelpers.tryGet candidate, hasInterface with
                 | Some generatorAttribute, true ->
-                    if not (FSharpGeneratorAttributeHelpers.isSupportedApiVersion generatorAttribute) then
+                    if not (hasPublicVisibility candidate) then
+                        diagnostics.Add(error "FSG0002" (sprintf "Generator type '%s' must be public." candidate.FullName))
+                    elif candidate.IsAbstract then
+                        diagnostics.Add(error "FSG0002" (sprintf "Generator type '%s' must not be abstract." candidate.FullName))
+                    elif not (FSharpGeneratorAttributeHelpers.isSupportedApiVersion generatorAttribute) then
                         diagnostics.Add(error "FSG0015" (sprintf "Generator type '%s' references unsupported F# source-generation API version %d. Supported version is %d." candidate.FullName generatorAttribute.ApiVersion FSharpGeneratorApiVersion.Current))
                     else
                         match candidate.GetConstructor(Type.EmptyTypes) with

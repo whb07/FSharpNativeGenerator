@@ -296,6 +296,12 @@ type InvalidAttributedType() =
     class
     end
 
+[<AbstractClass; FSharpGenerator>]
+type AbstractAttributedGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize _ =
+            ()
+
 [<FSharpGenerator>]
 type AdditionalTextGenerator() =
     interface IFSharpIncrementalGenerator with
@@ -1144,6 +1150,13 @@ let ``assembly loader reports attributed type without generator interface`` () =
     let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
 
     Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains(nameof(InvalidAttributedType), StringComparison.Ordinal)))
+
+[<Fact>]
+let ``assembly loader reports abstract attributed generator type`` () =
+    let assemblyPath = Assembly.GetExecutingAssembly().Location
+    let result = FSharpGeneratorAssemblyLoader.loadFromPath assemblyPath
+
+    Assert.True(result.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains(nameof(AbstractAttributedGenerator), StringComparison.Ordinal) && diagnostic.Message.Contains("abstract", StringComparison.OrdinalIgnoreCase)))
 
 [<Fact>]
 let ``assembly loader reports unsupported generator API version`` () =
