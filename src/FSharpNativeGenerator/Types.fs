@@ -132,6 +132,12 @@ type FSharpAdditionalText =
         Checksum: ImmutableArray<byte> option
     }
 
+type FSharpAdditionalTextsLoadResult =
+    {
+        AdditionalTexts: ImmutableArray<FSharpAdditionalText>
+        Diagnostics: ImmutableArray<FSharpGeneratorDiagnostic>
+    }
+
 module FSharpAdditionalText =
     let fromFile path =
         let fullPath = Path.GetFullPath(path)

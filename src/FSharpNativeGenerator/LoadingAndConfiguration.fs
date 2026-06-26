@@ -181,10 +181,25 @@ module FSharpSourceGeneratorConfiguration =
             RemainingArguments = ImmutableArray<string>.Empty
         }
 
+    let additionalTextsWithDiagnostics (configuration: FSharpSourceGeneratorConfiguration) =
+        let diagnostics = ResizeArray<FSharpGeneratorDiagnostic>()
+
+        let additionalTexts =
+            configuration.AdditionalFilePaths
+            |> Seq.map (fun path ->
+                if not (File.Exists path) then
+                    diagnostics.Add({ error "FSG0011" (sprintf "Additional file '%s' does not exist." path) with FilePath = Some path })
+
+                FSharpAdditionalText.fromFile path)
+            |> ImmutableArray.CreateRange
+
+        {
+            AdditionalTexts = additionalTexts
+            Diagnostics = ImmutableArray.CreateRange diagnostics
+        }
+
     let additionalTexts (configuration: FSharpSourceGeneratorConfiguration) =
-        configuration.AdditionalFilePaths
-        |> Seq.map FSharpAdditionalText.fromFile
-        |> ImmutableArray.CreateRange
+        (additionalTextsWithDiagnostics configuration).AdditionalTexts
 
     let private emptyAnalyzerConfigOptions =
         {

@@ -63,10 +63,20 @@ Generator options:
         else
             let loadResult = FSharpSourceGeneratorConfiguration.loadGenerators parsed.Configuration
             let loadDiagnostics = loadResult.Diagnostics
+            let additionalTextsResult = FSharpSourceGeneratorConfiguration.additionalTextsWithDiagnostics parsed.Configuration
             let analyzerConfigResult = FSharpSourceGeneratorConfiguration.analyzerConfigOptions parsed.Configuration
 
-            if Seq.append loadDiagnostics analyzerConfigResult.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
+            let configurationDiagnostics =
+                Seq.concat
+                    [
+                        loadDiagnostics :> seq<_>
+                        additionalTextsResult.Diagnostics :> seq<_>
+                        analyzerConfigResult.Diagnostics :> seq<_>
+                    ]
+
+            if configurationDiagnostics |> Seq.exists (fun diagnostic -> diagnostic.Severity = Error) then
                 loadDiagnostics |> Seq.iter printDiagnostic
+                additionalTextsResult.Diagnostics |> Seq.iter printDiagnostic
                 analyzerConfigResult.Diagnostics |> Seq.iter printDiagnostic
                 1
             else
@@ -84,7 +94,7 @@ Generator options:
                     {
                         ProjectOptions = projectOptions
                         SourceFiles = sourceFiles |> Seq.map sourceSnapshot |> ImmutableArray.CreateRange
-                        AdditionalTexts = FSharpSourceGeneratorConfiguration.additionalTexts parsed.Configuration
+                        AdditionalTexts = additionalTextsResult.AdditionalTexts
                         AnalyzerConfigOptions = analyzerConfigResult.Options
                     }
 

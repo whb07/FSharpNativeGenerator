@@ -1119,6 +1119,22 @@ let ``configuration creates additional text snapshots from files`` () =
     Assert.Contains("Customer", additionalText.GetText(CancellationToken.None).Value.Text)
 
 [<Fact>]
+let ``configuration reports missing additional files with file path`` () =
+    let root = tempRoot ()
+    let additionalPath = fileIn root "missing.json"
+
+    let result =
+        FSharpSourceGeneratorConfiguration.parseCommandLineArguments
+            [
+                "--fsharp-generator-additional-file:" + additionalPath
+            ]
+
+    let additionalTextsResult = FSharpSourceGeneratorConfiguration.additionalTextsWithDiagnostics result.Configuration
+
+    Assert.Single(additionalTextsResult.AdditionalTexts) |> ignore
+    Assert.True(additionalTextsResult.Diagnostics |> Seq.exists (fun diagnostic -> diagnostic.Id = "FSG0011" && diagnostic.FilePath = Some additionalPath))
+
+[<Fact>]
 let ``configuration loads global and per-path analyzer config options`` () =
     let root = tempRoot ()
     let configPath = fileIn root ".globalconfig"
