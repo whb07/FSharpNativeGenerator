@@ -1,6 +1,7 @@
 namespace FSharp.Compiler.SourceGeneration
 
 open System
+open System.Collections.Generic
 open System.Collections.Immutable
 open System.IO
 open System.Text
@@ -225,9 +226,10 @@ module internal Placement =
 
         match finalOriginalImplementationIndex original with
         | Some finalOriginalIndex ->
-            let adjustedIndex = finalOriginalIndex + (prelude |> List.sumBy (fun unit -> unit.Paths.Length))
+            let mutable adjustedIndex = finalOriginalIndex + (prelude |> List.sumBy (fun unit -> unit.Paths.Length))
             for unit in beforeLast do
                 ordered <- insertAt adjustedIndex unit.Paths ordered
+                adjustedIndex <- adjustedIndex + unit.Paths.Length
         | None ->
             diagnostics.Add(Diagnostics.error "FSG0007" (sprintf "BeforeLastSourceFile placement for generated source '%s' could not be resolved because the project has no implementation source file." (hintList beforeLast)))
 
@@ -239,6 +241,7 @@ module internal Placement =
 
         let mutable remaining = anchored
         let mutable progressed = true
+        let afterFileOffsets = Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
 
         while progressed && not remaining.IsEmpty do
             progressed <- false
@@ -256,7 +259,14 @@ module internal Placement =
                 | AfterFile anchorPath ->
                     match findPathIndex anchorPath ordered with
                     | Some index ->
-                        ordered <- insertAt (index + 1) unit.Paths ordered
+                        let anchorKey = Path.GetFullPath(anchorPath)
+                        let offset =
+                            match afterFileOffsets.TryGetValue anchorKey with
+                            | true, value -> value
+                            | false, _ -> 0
+
+                        ordered <- insertAt (index + 1 + offset) unit.Paths ordered
+                        afterFileOffsets[anchorKey] <- offset + unit.Paths.Length
                         progressed <- true
                     | None -> nextRemaining.Add unit
                 | _ -> ()
