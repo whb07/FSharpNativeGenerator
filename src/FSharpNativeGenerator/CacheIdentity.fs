@@ -53,7 +53,14 @@ module internal CacheIdentityParts =
                 loop tail (normalizeProjectPath projectOptions value :: paths)
             | option :: tail ->
                 let referencePath =
-                    [ "--reference:"; "-r:"; "/reference:"; "/r:" ]
+                    [ "--reference:"
+                      "--reference="
+                      "-r:"
+                      "-r="
+                      "/reference:"
+                      "/reference="
+                      "/r:"
+                      "/r=" ]
                     |> List.tryPick (fun prefix -> tryPrefixedValue prefix option)
 
                 match referencePath with

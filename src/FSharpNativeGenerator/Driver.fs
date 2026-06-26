@@ -53,7 +53,11 @@ module private ProjectOutputPath =
                 match tryPrefixedValue "--out:" option with
                 | Some value -> Some value
                 | None ->
-                    match tryPrefixedValue "-o:" option with
+                    let outputPath =
+                        [ "--out="; "-o:"; "-o="; "/out:"; "/out=" ]
+                        |> List.tryPick (fun prefix -> tryPrefixedValue prefix option)
+
+                    match outputPath with
                     | Some value -> Some value
                     | None -> loop tail
 

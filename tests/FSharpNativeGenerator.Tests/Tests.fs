@@ -1046,6 +1046,33 @@ let ``split compiler output option is used for generator assembly validation`` (
     Assert.Empty(result.GeneratedSources)
 
 [<Fact>]
+let ``equals compiler output option is used for generator assembly validation`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+
+    let generatorAssemblyPath =
+        Path.GetFullPath typeof<ImplementationGenerator>.Assembly.Location
+
+    let options =
+        { FSharpGeneratorDriverOptions.defaults with
+            GeneratedRoot = fileIn root "generated" }
+
+    let project =
+        snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "--out=" + generatorAssemblyPath ]
+
+    let result =
+        project |> runWith options (ImplementationGenerator("Generated", Prelude))
+
+    Assert.True(
+        result.Diagnostics
+        |> Seq.exists (fun diagnostic ->
+            diagnostic.Id = "FSG0002"
+            && diagnostic.Message.Contains(generatorAssemblyPath, StringComparison.OrdinalIgnoreCase))
+    )
+
+    Assert.Empty(result.GeneratedSources)
+
+[<Fact>]
 let ``initialization exception is reported`` () =
     let root = tempRoot ()
     let domain = fileIn root "Domain.fs"
@@ -1902,6 +1929,23 @@ let ``referenced assembly content change updates project cache identity`` () =
 
     let project =
         snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "--reference"; referencePath ]
+
+    let identityA = FSharpProjectCacheIdentity.compute project []
+    writeBytes referencePath [| 4uy; 5uy; 6uy |]
+    let identityB = FSharpProjectCacheIdentity.compute project []
+
+    Assert.NotEqual<byte seq>(identityA, identityB)
+
+[<Fact>]
+let ``equals referenced assembly option updates project cache identity`` () =
+    let root = tempRoot ()
+    let domain = fileIn root "Domain.fs"
+    let referencePath = fileIn root "Reference.dll"
+
+    writeBytes referencePath [| 1uy; 2uy; 3uy |]
+
+    let project =
+        snapshotWithOtherOptions Library [ domain ] [ "--define:TEST"; "--reference=" + referencePath ]
 
     let identityA = FSharpProjectCacheIdentity.compute project []
     writeBytes referencePath [| 4uy; 5uy; 6uy |]
