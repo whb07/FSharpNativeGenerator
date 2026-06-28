@@ -18,6 +18,7 @@
     <Compile Include="LoadingAndConfiguration.fs" />
     <Compile Include="Adapter.fs" />
     <Compile Include="Host.fs" />
+    <Compile Include="ScenarioGenerators.fs" />
   </ItemGroup>
 
   <ItemGroup>

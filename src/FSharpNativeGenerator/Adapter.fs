@@ -13,26 +13,70 @@ type IncrementalGeneratorAdapter(inner: IFSharpIncrementalGenerator, generatorId
     let postInitOutputs = ResizeArray<Action<FSharpPostInitializationContext>>()
     let sourceOutputs = ResizeArray<RegisteredSourceOutput>()
 
-    let emptyAnalyzerOptions =
-        { GlobalOptions = Dictionary<string, string>() :> IReadOnlyDictionary<string, string>
-          GetOptionsForPath = fun _ -> Dictionary<string, string>() :> IReadOnlyDictionary<string, string> }
+    let tryGetOption key (options: IReadOnlyDictionary<string, string>) =
+        match options.TryGetValue key with
+        | true, value when not (String.IsNullOrWhiteSpace value) -> Some value
+        | _ -> None
+
+    let additionalFileFromOptions path text (analyzerOptions: FSharpAnalyzerConfigOptions) =
+        let normalizedPath =
+            if String.IsNullOrWhiteSpace path then
+                path
+            else
+                try Path.GetFullPath path with _ -> path
+
+        let options = analyzerOptions.GetOptionsForPath normalizedPath
+        let metadata = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        let prefix = "build_metadata.AdditionalFiles."
+
+        for kvp in options do
+            if kvp.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) then
+                metadata[kvp.Key.Substring(prefix.Length)] <- kvp.Value
+
+        let logicalName =
+            tryGetOption "FSharpGeneratorLogicalName" metadata
+            |> Option.orElseWith (fun () ->
+                let fileName = Path.GetFileNameWithoutExtension normalizedPath
+                if String.IsNullOrWhiteSpace fileName then None else Some fileName)
+
+        let kind = tryGetOption "FSharpGeneratorKind" metadata
+
+        { Path = normalizedPath
+          Text = text
+          LogicalName = logicalName
+          Kind = kind
+          Metadata = metadata :> IReadOnlyDictionary<string, string>
+          Options = options }
 
     let initContext =
         FSharpIncrementalGeneratorInitializationContext(
-            { Evaluate = fun state -> (state :?> FSharpGeneratorProjectSnapshot * Map<string, string>) |> fst },
+            { Evaluate =
+                fun state ->
+                    let snapshot, _, _ = state :?> FSharpGeneratorProjectSnapshot * Map<string, string> * FSharpAnalyzerConfigOptions
+                    snapshot },
             { EvaluateMany =
                 fun state ->
-                    let snapshot, _ = state :?> FSharpGeneratorProjectSnapshot * Map<string, string>
+                    let snapshot, _, _ = state :?> FSharpGeneratorProjectSnapshot * Map<string, string> * FSharpAnalyzerConfigOptions
                     snapshot.SourceFiles
                     |> Seq.map (fun path ->
                         { Path = path
                           IsSignatureFile = Path.GetExtension(path).Equals(".fsi", StringComparison.OrdinalIgnoreCase) }) },
             { EvaluateMany =
                 fun state ->
-                    let _, additionalFiles = state :?> FSharpGeneratorProjectSnapshot * Map<string, string>
+                    let _, additionalFiles, _ = state :?> FSharpGeneratorProjectSnapshot * Map<string, string> * FSharpAnalyzerConfigOptions
                     additionalFiles
                     |> Seq.map (fun kvp -> { Path = kvp.Key; Text = kvp.Value }) },
-            { Evaluate = fun _ -> emptyAnalyzerOptions },
+            { EvaluateMany =
+                fun state ->
+                    let _, additionalFiles, analyzerOptions =
+                        state :?> FSharpGeneratorProjectSnapshot * Map<string, string> * FSharpAnalyzerConfigOptions
+
+                    additionalFiles
+                    |> Seq.map (fun kvp -> additionalFileFromOptions kvp.Key kvp.Value analyzerOptions) },
+            { Evaluate =
+                fun state ->
+                    let _, _, analyzerOptions = state :?> FSharpGeneratorProjectSnapshot * Map<string, string> * FSharpAnalyzerConfigOptions
+                    analyzerOptions },
             postInitOutputs,
             sourceOutputs)
 
@@ -88,7 +132,12 @@ type IncrementalGeneratorAdapter(inner: IFSharpIncrementalGenerator, generatorId
         Path.Combine(Array.concat [| [| root |]; generatorSegments; [| fileName |] |]) |> Path.GetFullPath
 
     let mapDiagnostic (diagnostic: FSharpGeneratorDiagnostic) =
-        FSharpGeneratorDiagnostic.toSourceGeneratorDiagnostic diagnostic
+        let mapped = FSharpGeneratorDiagnostic.toSourceGeneratorDiagnostic diagnostic
+
+        match diagnostic.FilePath with
+        | Some path when not (String.IsNullOrWhiteSpace path) ->
+            { mapped with Message = sprintf "%s: %s" path mapped.Message }
+        | _ -> mapped
 
     let snapshotFromContext (ctx: FSharpSourceGeneratorContext) =
         { ProjectFileName = ctx.ProjectFileName
@@ -129,12 +178,13 @@ type IncrementalGeneratorAdapter(inner: IFSharpIncrementalGenerator, generatorId
                     )
 
             let snapshot = snapshotFromContext ctx
+            let analyzerOptions = FSharpAnalyzerConfigSupport.getForProjectDirectory projectDirectory
 
             for output in sourceOutputs do
                 let productionContext = FSharpSourceProductionContext(pending, diagnostics, ctx.CancellationToken, createFileName)
 
                 try
-                    output (snapshot, ctx.AdditionalFiles) productionContext
+                    output (snapshot, ctx.AdditionalFiles, analyzerOptions) productionContext
                 with ex ->
                     diagnostics.Add(
                         FSharpGeneratorDiagnostic.create

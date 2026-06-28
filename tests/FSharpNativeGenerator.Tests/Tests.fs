@@ -7,6 +7,7 @@ open System.Threading
 open FSharp.Compiler.CodeAnalysis
 open FSharp.Compiler.Diagnostics
 open FSharp.Compiler.SourceGeneration
+open FSharp.Compiler.SourceGeneration.Examples
 open FSharpNativeGenerator.TestGenerators
 open Xunit
 
@@ -23,6 +24,16 @@ let private generatorOptions root additionalFiles =
       AdditionalFiles = additionalFiles
       AnalyzerConfigFiles = []
       MaxPasses = 1 }
+
+let private generatorOptionsWithAnalyzerConfigs root additionalFiles analyzerConfigFiles =
+    { OutputDirectory = Path.Combine(root, "obj", "Generated", "FSharp")
+      EmitGeneratedFiles = false
+      AdditionalFiles = additionalFiles
+      AnalyzerConfigFiles = analyzerConfigFiles
+      MaxPasses = 1 }
+
+let private scenarioAnalyzerConfig sections =
+    "root = true\n\n" + String.concat "\n\n" sections
 
 let private context root sourceFiles additionalFiles otherOptions =
     { ProjectFileName = Some(Path.Combine(root, "App.fsproj"))
@@ -41,6 +52,17 @@ let private projectOptions (checker: FSharpChecker) root (sourceFiles: string li
         [| yield "--target:library"
            yield "--warn:3"
            yield "-o:" + Path.Combine(root, "bin", "App.dll")
+           yield! sourceFiles |]
+
+    checker.GetProjectOptionsFromCommandLineArgs(Path.Combine(root, "App.fsproj"), argv)
+
+let private projectOptionsWithReferences (checker: FSharpChecker) root (sourceFiles: string list) (references: string list) =
+    let argv =
+        [| yield "--target:library"
+           yield "--warn:3"
+           yield "-o:" + Path.Combine(root, "bin", "App.dll")
+           for reference in references do
+               yield "-r:" + reference
            yield! sourceFiles |]
 
     checker.GetProjectOptionsFromCommandLineArgs(Path.Combine(root, "App.fsproj"), argv)
@@ -439,6 +461,42 @@ type AnalyzerConfigObservingGenerator() =
                     productionContext.AddImplementationSource("AnalyzerConfigObservation", source, Prelude))
             )
 
+[<FSharpGenerator>]
+type KindCollectingGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            let jsonFiles =
+                context.AdditionalFilesProvider
+                |> FSharpIncrementalValuesProvider.whereKind "json"
+                |> FSharpIncrementalValuesProvider.collectToValue
+
+            let combined =
+                FSharpIncrementalValueProvider.map2
+                    (fun (snapshot: FSharpGeneratorProjectSnapshot) files -> snapshot.AssemblyName, files)
+                    context.ProjectOptionsProvider
+                    jsonFiles
+
+            context.RegisterSourceOutput(
+                combined,
+                Action<FSharpSourceProductionContext, string option * FSharpAdditionalFileInput list>(fun productionContext (_, files) ->
+                    productionContext.AddImplementationSource("KindCollection", sprintf "module KindCollection\nlet count = %d" files.Length, Prelude))
+            )
+
+[<FSharpGenerator>]
+type CompositeExtensionCollectingGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            let openApiFiles =
+                context.AdditionalFilesProvider
+                |> FSharpIncrementalValuesProvider.wherePathExtension ".openapi.json"
+                |> FSharpIncrementalValuesProvider.collectToValue
+
+            context.RegisterSourceOutput(
+                openApiFiles,
+                Action<FSharpSourceProductionContext, FSharpAdditionalFileInput list>(fun productionContext files ->
+                    productionContext.AddImplementationSource("CompositeExtensionCollection", sprintf "module CompositeExtensionCollection\nlet count = %d" files.Length, Prelude))
+            )
+
 [<Fact>]
 let Loader_ConstructorFailureDoesNotHideOtherValidGenerators () =
     let path = typeof<CliHarnessGenerator>.Assembly.Location
@@ -507,6 +565,94 @@ let Adapter_AnalyzerConfigProviderIsDeterministicallyEmptyUntilForkContextCarrie
     Assert.Contains("module AnalyzerConfigWasEmpty", source.SourceText)
 
 [<Fact>]
+let Host_AnalyzerConfigProviderReadsGlobalOptions () =
+    let root = tempRoot ()
+    let userFile = Path.Combine(root, "User.fs")
+    let analyzer = Path.Combine(root, ".globalconfig")
+    writeFile userFile "module User"
+    writeFile analyzer "is_global = true\nbuild_property.GeneratedModuleName = AnalyzerConfigWasSet\n"
+    let checker = FSharpChecker.Create()
+    let host = FSharpGeneratorHost(checker)
+    let options = projectOptions checker root [ userFile ]
+    let result =
+        host.RunGenerators(options, [ loaded (AnalyzerConfigObservingGenerator()) "Tests/AnalyzerConfigHost" ], generatorOptionsWithAnalyzerConfigs root [] [ analyzer ])
+        |> Async.RunSynchronously
+        |> snd
+
+    let source = Assert.Single result.GeneratedSources
+    Assert.Contains("module AnalyzerConfigWasSet", source.SourceText)
+
+[<Fact>]
+let Host_AdditionalFilesProviderSupportsKindFilterCollectToValueAndMap2 () =
+    let root = tempRoot ()
+    let userFile = Path.Combine(root, "User.fs")
+    let jsonFile = Path.Combine(root, "settings.json")
+    let sqlFile = Path.Combine(root, "query.sql")
+    let analyzer = Path.Combine(root, ".editorconfig")
+    writeFile userFile "module User"
+    writeFile jsonFile "{}"
+    writeFile sqlFile "select 1"
+    writeFile analyzer (
+        scenarioAnalyzerConfig
+            [ "[*.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = json"
+              "[*.sql]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = sql" ])
+    let checker = FSharpChecker.Create()
+    let host = FSharpGeneratorHost(checker)
+    let options = projectOptions checker root [ userFile ]
+    let result =
+        host.RunGenerators(options, [ loaded (KindCollectingGenerator()) "Tests/KindCollect" ], generatorOptionsWithAnalyzerConfigs root [ jsonFile; sqlFile ] [ analyzer ])
+        |> Async.RunSynchronously
+        |> snd
+
+    let source = Assert.Single result.GeneratedSources
+    Assert.Contains("let count = 1", source.SourceText)
+
+[<Fact>]
+let Host_AdditionalFilesProviderSupportsCompositeExtensionFilter () =
+    let root = tempRoot ()
+    let userFile = Path.Combine(root, "User.fs")
+    let openApiFile = Path.Combine(root, "petstore.openapi.json")
+    let jsonFile = Path.Combine(root, "settings.json")
+    writeFile userFile "module User"
+    writeFile openApiFile "{}"
+    writeFile jsonFile "{}"
+    let checker = FSharpChecker.Create()
+    let host = FSharpGeneratorHost(checker)
+    let options = projectOptions checker root [ userFile ]
+    let result =
+        host.RunGenerators(options, [ loaded (CompositeExtensionCollectingGenerator()) "Tests/CompositeExtension" ], generatorOptions root [ openApiFile; jsonFile ])
+        |> Async.RunSynchronously
+        |> snd
+
+    let source = Assert.Single result.GeneratedSources
+    Assert.Contains("let count = 1", source.SourceText)
+
+[<Fact>]
+let AdditionalFileInput_MetadataHelpersExposeCommonValues () =
+    let metadata =
+        System.Collections.Generic.Dictionary<string, string>
+            (dict
+                [ "FSharpGeneratorNamespace", "Sample.Namespace"
+                  "FSharpGeneratorModule", "SampleModule"
+                  "Required", "value" ])
+    let options = System.Collections.Generic.Dictionary<string, string>(dict [ "custom_option", "configured" ])
+    let file =
+        { Path = Path.Combine(tempRoot (), "settings.json")
+          Text = "{}"
+          LogicalName = None
+          Kind = Some "json"
+          Metadata = metadata :> System.Collections.Generic.IReadOnlyDictionary<string, string>
+          Options = options :> System.Collections.Generic.IReadOnlyDictionary<string, string> }
+
+    Assert.Equal(Some "value", FSharpAdditionalFileInput.tryGetMetadata "Required" file)
+    Assert.Equal(Ok "value", FSharpAdditionalFileInput.requireMetadata "Required" file)
+    Assert.True((FSharpAdditionalFileInput.requireMetadata "Missing" file).IsError)
+    Assert.Equal(Some "configured", FSharpAdditionalFileInput.tryGetOption "custom_option" file)
+    Assert.Equal("settings", FSharpAdditionalFileInput.logicalNameOrFileName file)
+    Assert.Equal("Sample.Namespace", FSharpAdditionalFileInput.namespaceOrDefault "Default.Namespace" file)
+    Assert.Equal("SampleModule", FSharpAdditionalFileInput.moduleOrDefault "DefaultModule" file)
+
+[<Fact>]
 let Placement_RelativeAnchorMatchesAbsoluteOriginalPath () =
     let root = tempRoot ()
     let original = Path.Combine(root, "A.fs")
@@ -523,3 +669,324 @@ let Placement_RelativeAnchorMatchesAbsoluteOriginalPath () =
     let generated, diagnostics = expectOk (FSharpGeneratedSourcePlacementResolver.resolve [ original ] [] [ source ])
     Assert.Empty diagnostics
     Assert.Equal(FSharpGeneratedSourceOrder.BeforeFile(Path.GetFullPath relativeAnchor), generated.Head.Order)
+
+let private runScenarioGenerator root userSource additionalPath additionalText analyzerText generator =
+    let userFile = Path.Combine(root, "User.fs")
+    let analyzer = Path.Combine(root, ".editorconfig")
+    writeFile userFile userSource
+    writeFile additionalPath additionalText
+    writeFile analyzer analyzerText
+    let checker = FSharpChecker.Create()
+    let host = FSharpGeneratorHost(checker)
+    let options = projectOptions checker root [ userFile ]
+
+    host.RunGenerators(options, [ loaded generator "Tests/Scenario" ], generatorOptionsWithAnalyzerConfigs root [ additionalPath ] [ analyzer ])
+    |> Async.RunSynchronously
+    |> snd
+
+let private compileScenario root userSource additionalPath additionalText analyzerText generator references =
+    let userFile = Path.Combine(root, "User.fs")
+    let analyzer = Path.Combine(root, ".editorconfig")
+    writeFile userFile userSource
+    writeFile additionalPath additionalText
+    writeFile analyzer analyzerText
+    let host = FSharpGeneratorHost(FSharpChecker.Create())
+    let argv =
+        [| yield "fsc.exe"
+           yield "--targetprofile:netcore"
+           yield "--target:library"
+           yield "-o:" + Path.Combine(root, "App.dll")
+           for reference in references do
+               yield "-r:" + reference
+           yield userFile |]
+
+    host.Compile(argv, [ loaded generator "Tests/ScenarioCompile" ], generatorOptionsWithAnalyzerConfigs root [ additionalPath ] [ analyzer ])
+    |> Async.RunSynchronously
+
+[<Fact>]
+let Scenario_JsonAdditionalFileGeneratesTypedRecordVisibleToUserCode () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "appsettings.json")
+    let userFile = Path.Combine(root, "User.fs")
+    let analyzer = Path.Combine(root, ".editorconfig")
+    writeFile userFile "module User\nlet parsed = MyApp.Config.AppSettingsLoader.parse \"{ \\\"serviceName\\\": \\\"orders\\\", \\\"retryCount\\\": 3, \\\"features\\\": { \\\"audit\\\": true } }\"\nlet serviceName: string = parsed.ServiceName\nlet retryCount: int = parsed.RetryCount\nlet audit: bool = parsed.Features.Audit"
+    writeFile additional """{ "serviceName": "orders", "retryCount": 3, "features": { "audit": true } }"""
+    writeFile analyzer (
+        scenarioAnalyzerConfig
+            [ "[*.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = json\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Config\nbuild_metadata.AdditionalFiles.JsonRootType = AppSettings" ])
+
+    let checker = FSharpChecker.Create()
+    let host = FSharpGeneratorHost(checker)
+    let options = projectOptions checker root [ userFile ]
+    let results, runResult =
+        host.ParseAndCheck(options, [ loaded (JsonConfigGenerator()) "Tests/JsonScenario" ], generatorOptionsWithAnalyzerConfigs root [ additional ] [ analyzer ])
+        |> Async.RunSynchronously
+
+    Assert.Empty runResult.Diagnostics
+    Assert.Contains(runResult.GeneratedSources, fun source -> source.SourceText.Contains("type AppSettings", StringComparison.Ordinal))
+    Assert.Empty(results.Diagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
+
+[<Fact>]
+let Scenario_InvalidJsonReportsDiagnosticWithAdditionalFilePath () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "broken.json")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            "{ invalid"
+            (scenarioAnalyzerConfig [ "[*.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = json" ])
+            (JsonConfigGenerator())
+
+    Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSGJSON0001" && diagnostic.Message.Contains(additional, StringComparison.Ordinal))
+
+[<Fact>]
+let Scenario_OpenApiGeneratesClientAndDtoVisibleToUserCode () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "petstore.openapi.json")
+    let userFile = Path.Combine(root, "User.fs")
+    let analyzer = Path.Combine(root, ".editorconfig")
+    writeFile userFile "module User\nlet pet: MyApp.Api.Pet = { Id = 1L; Name = \"Milo\" }\nlet client = MyApp.Api.PetStoreClient(fun _ -> async { return \"{ \\\"name\\\": \\\"Milo\\\" }\" })\nlet loadedPet: Async<MyApp.Api.Pet> = client.GetPetById 1L"
+    writeFile additional """{ "openapi": "3.0.0", "components": { "schemas": { "Pet": { "type": "object", "properties": { "id": { "type": "integer", "format": "int64" }, "name": { "type": "string" } } } } }, "paths": { "/pets/{id}": { "get": { "operationId": "getPetById", "responses": { "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } } } } } } } } }"""
+    writeFile analyzer (
+        scenarioAnalyzerConfig
+            [ "[*.openapi.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = openapi\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Api\nbuild_metadata.AdditionalFiles.OpenApiClientName = PetStoreClient" ])
+
+    let checker = FSharpChecker.Create()
+    let host = FSharpGeneratorHost(checker)
+    let options = projectOptions checker root [ userFile ]
+    let results, runResult =
+        host.ParseAndCheck(options, [ loaded (OpenApiClientGenerator()) "Tests/OpenApiScenario" ], generatorOptionsWithAnalyzerConfigs root [ additional ] [ analyzer ])
+        |> Async.RunSynchronously
+
+    Assert.Empty runResult.Diagnostics
+    Assert.Contains(runResult.GeneratedSources, fun source -> source.SourceText.Contains("type PetStoreClient", StringComparison.Ordinal))
+    Assert.Empty(results.Diagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
+
+[<Fact>]
+let Scenario_OpenApiDuplicateOperationIdsReportDiagnostic () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "duplicate.openapi.json")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            """{ "openapi": "3.0.0", "paths": { "/a": { "get": { "operationId": "same" } }, "/b": { "post": { "operationId": "same" } } } }"""
+            (scenarioAnalyzerConfig [ "[*.openapi.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = openapi" ])
+            (OpenApiClientGenerator())
+
+    Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSGOPENAPI0002" && diagnostic.Message.Contains(additional, StringComparison.Ordinal))
+
+[<Fact>]
+let Scenario_CHeaderGeneratesNativeExterns () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "simple.h")
+    let userFile = Path.Combine(root, "User.fs")
+    let analyzer = Path.Combine(root, ".editorconfig")
+    writeFile userFile "module User\nlet addPtr = MyApp.Native.Simple.Add"
+    writeFile additional "int add(int left, int right);\ndouble distance(double x, double y);"
+    writeFile analyzer (scenarioAnalyzerConfig [ "[*.h]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = c-header\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Native\nbuild_metadata.AdditionalFiles.NativeLibraryName = simple\nbuild_metadata.AdditionalFiles.NativeModuleName = Simple" ])
+    let checker = FSharpChecker.Create()
+    let host = FSharpGeneratorHost(checker)
+    let options =
+        projectOptionsWithReferences
+            checker
+            root
+            [ userFile ]
+            [ typeof<System.Runtime.InteropServices.DllImportAttribute>.Assembly.Location ]
+    let results, result =
+        host.ParseAndCheck(options, [ loaded (NativeHeaderBindingGenerator()) "Tests/NativeScenario" ], generatorOptionsWithAnalyzerConfigs root [ additional ] [ analyzer ])
+        |> Async.RunSynchronously
+
+    Assert.Empty result.Diagnostics
+    let source = Assert.Single result.GeneratedSources
+    Assert.Contains("module Simple", source.SourceText)
+    Assert.Contains("extern int Add(int left, int right)", source.SourceText)
+    Assert.Contains("DllImport(\"simple\"", source.SourceText)
+    Assert.Empty(results.Diagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
+
+[<Fact>]
+let Scenario_CHeaderUnsupportedDeclarationReportsDiagnostic () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "unsupported.h")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            "#define VALUE 1\nint add(int left, int right);"
+            (scenarioAnalyzerConfig [ "[*.h]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = c-header\nbuild_metadata.AdditionalFiles.NativeLibraryName = simple" ])
+            (NativeHeaderBindingGenerator())
+
+    Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSGNATIVE0001" && diagnostic.Message.Contains(additional, StringComparison.Ordinal))
+
+[<Fact>]
+let Scenario_SqlFileGeneratesTypedQueryVisibleToUserCode () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "GetUserById.sql")
+    let userFile = Path.Combine(root, "User.fs")
+    let analyzer = Path.Combine(root, ".editorconfig")
+    writeFile userFile "module User\nlet row: MyApp.Data.GetUserByIdRow = { Id = 1; Name = \"Ada\"; Email = None }\nlet executor (_: string) (_: (string * obj) list) = async { return Some(Map.ofList [ \"id\", box 1; \"name\", box \"Ada\"; \"email\", box (Some \"a@example.com\") ]) }\nlet queryResult: Async<MyApp.Data.GetUserByIdRow option> = MyApp.Data.Queries.getUserById executor 1"
+    writeFile additional "-- name: GetUserById\n-- result: one\nselect id, name, email\nfrom users\nwhere id = @id;"
+    writeFile analyzer (
+        scenarioAnalyzerConfig
+            [ "[*.sql]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = sql\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Data\nbuild_metadata.AdditionalFiles.SqlResultColumns = id:int,name:string,email:string option" ])
+
+    let checker = FSharpChecker.Create()
+    let host = FSharpGeneratorHost(checker)
+    let options = projectOptions checker root [ userFile ]
+    let results, runResult =
+        host.ParseAndCheck(options, [ loaded (SqlQueryGenerator()) "Tests/SqlScenario" ], generatorOptionsWithAnalyzerConfigs root [ additional ] [ analyzer ])
+        |> Async.RunSynchronously
+
+    Assert.Empty runResult.Diagnostics
+    Assert.Contains(runResult.GeneratedSources, fun source -> source.SourceText.Contains("type GetUserByIdRow", StringComparison.Ordinal))
+    Assert.Empty(results.Diagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
+
+[<Fact>]
+let Scenario_SqlSchemaMismatchReportsDiagnostic () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "GetUserById.sql")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            "-- name: GetUserById\nselect id, email\nfrom users\nwhere id = @id;"
+            (scenarioAnalyzerConfig [ "[*.sql]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = sql\nbuild_metadata.AdditionalFiles.SqlResultColumns = id:int" ])
+            (SqlQueryGenerator())
+
+    Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSGSQL0002" && diagnostic.Message.Contains(additional, StringComparison.Ordinal))
+
+[<Fact>]
+let Scenario_AnalyzerConfigMetadataChangesGeneratedNamespace () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "settings.json")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            """{ "name": "demo" }"""
+            (scenarioAnalyzerConfig [ "[*.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = json\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = Custom.Config\nbuild_metadata.AdditionalFiles.JsonRootType = Settings" ])
+            (JsonConfigGenerator())
+
+    let source = Assert.Single result.GeneratedSources
+    Assert.Contains("namespace Custom.Config", source.SourceText)
+    Assert.Contains("type Settings", source.SourceText)
+
+[<Fact>]
+let Scenario_StableHintNamesDoNotCollideForSameFileNameInDifferentDirectories () =
+    let root = tempRoot ()
+    let first = Path.Combine(root, "one", "settings.json")
+    let second = Path.Combine(root, "two", "settings.json")
+    let userFile = Path.Combine(root, "User.fs")
+    let analyzer = Path.Combine(root, ".editorconfig")
+    writeFile userFile "module User"
+    writeFile first """{ "first": true }"""
+    writeFile second """{ "second": true }"""
+    writeFile analyzer (scenarioAnalyzerConfig [ "[*.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = json\nbuild_metadata.AdditionalFiles.JsonRootType = Settings" ])
+
+    let checker = FSharpChecker.Create()
+    let host = FSharpGeneratorHost(checker)
+    let options = projectOptions checker root [ userFile ]
+    let result =
+        host.RunGenerators(options, [ loaded (JsonConfigGenerator()) "Tests/JsonStableHints" ], generatorOptionsWithAnalyzerConfigs root [ first; second ] [ analyzer ])
+        |> Async.RunSynchronously
+        |> snd
+
+    Assert.Empty result.Diagnostics
+    Assert.Equal(2, result.GeneratedSources.Length)
+    Assert.Equal(2, result.GeneratedSources |> List.map _.HintName |> Set.ofList |> Set.count)
+
+[<Fact>]
+let Scenario_AnalyzerConfigContentChangeInvalidatesForkRunCache () =
+    let root = tempRoot ()
+    let userFile = Path.Combine(root, "User.fs")
+    let additional = Path.Combine(root, "settings.json")
+    let analyzer = Path.Combine(root, ".editorconfig")
+    writeFile userFile "module User"
+    writeFile additional """{ "name": "demo" }"""
+    writeFile analyzer (scenarioAnalyzerConfig [ "[*.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = json\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = First.Config\nbuild_metadata.AdditionalFiles.JsonRootType = Settings" ])
+    let checker = FSharpChecker.Create()
+    let host = FSharpGeneratorHost(checker)
+    let options = projectOptions checker root [ userFile ]
+    let generator = loaded (JsonConfigGenerator()) "Tests/JsonConfigCache"
+
+    let _, first =
+        host.RunGenerators(options, [ generator ], generatorOptionsWithAnalyzerConfigs root [ additional ] [ analyzer ])
+        |> Async.RunSynchronously
+
+    writeFile analyzer (scenarioAnalyzerConfig [ "[*.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = json\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = Second.Config\nbuild_metadata.AdditionalFiles.JsonRootType = Settings" ])
+
+    let _, second =
+        host.RunGenerators(options, [ generator ], generatorOptionsWithAnalyzerConfigs root [ additional ] [ analyzer ])
+        |> Async.RunSynchronously
+
+    Assert.False second.CacheHit
+    Assert.Contains(first.GeneratedSources, fun source -> source.SourceText.Contains("namespace First.Config", StringComparison.Ordinal))
+    Assert.Contains(second.GeneratedSources, fun source -> source.SourceText.Contains("namespace Second.Config", StringComparison.Ordinal))
+
+[<Fact>]
+let Scenario_CompilePathWorksForJsonOpenApiNativeAndSqlExamples () =
+    let jsonRoot = tempRoot ()
+    let jsonDiagnostics, jsonRunResult, jsonException =
+        compileScenario
+            jsonRoot
+            "module User\nlet parsed = MyApp.Config.AppSettingsLoader.parse \"{ \\\"serviceName\\\": \\\"orders\\\", \\\"retryCount\\\": 3, \\\"features\\\": { \\\"audit\\\": true } }\"\nlet audit: bool = parsed.Features.Audit"
+            (Path.Combine(jsonRoot, "appsettings.json"))
+            """{ "serviceName": "orders", "retryCount": 3, "features": { "audit": true } }"""
+            (scenarioAnalyzerConfig [ "[*.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = json\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Config\nbuild_metadata.AdditionalFiles.JsonRootType = AppSettings" ])
+            (JsonConfigGenerator())
+            []
+
+    Assert.Empty jsonRunResult.Diagnostics
+    Assert.Empty(jsonDiagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
+    Assert.Null jsonException
+
+    let openApiRoot = tempRoot ()
+    let openApiDiagnostics, openApiRunResult, openApiException =
+        compileScenario
+            openApiRoot
+            "module User\nlet client = MyApp.Api.PetStoreClient(fun _ -> async { return \"{ \\\"name\\\": \\\"Milo\\\" }\" })\nlet loadedPet: Async<MyApp.Api.Pet> = client.GetPetById 1L"
+            (Path.Combine(openApiRoot, "petstore.openapi.json"))
+            """{ "openapi": "3.0.0", "components": { "schemas": { "Pet": { "type": "object", "properties": { "id": { "type": "integer", "format": "int64" }, "name": { "type": "string" } } } } }, "paths": { "/pets/{id}": { "get": { "operationId": "getPetById", "responses": { "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } } } } } } } } }"""
+            (scenarioAnalyzerConfig [ "[*.openapi.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = openapi\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Api\nbuild_metadata.AdditionalFiles.OpenApiClientName = PetStoreClient" ])
+            (OpenApiClientGenerator())
+            []
+
+    Assert.Empty openApiRunResult.Diagnostics
+    Assert.Empty(openApiDiagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
+    Assert.Null openApiException
+
+    let nativeRoot = tempRoot ()
+    let nativeDiagnostics, nativeRunResult, nativeException =
+        compileScenario
+            nativeRoot
+            "module User\nlet addPtr = MyApp.Native.Simple.Add"
+            (Path.Combine(nativeRoot, "simple.h"))
+            "int add(int left, int right);"
+            (scenarioAnalyzerConfig [ "[*.h]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = c-header\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Native\nbuild_metadata.AdditionalFiles.NativeLibraryName = simple\nbuild_metadata.AdditionalFiles.NativeModuleName = Simple" ])
+            (NativeHeaderBindingGenerator())
+            [ typeof<System.Runtime.InteropServices.DllImportAttribute>.Assembly.Location ]
+
+    Assert.Empty nativeRunResult.Diagnostics
+    Assert.Empty(nativeDiagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
+    Assert.Null nativeException
+
+    let sqlRoot = tempRoot ()
+    let sqlDiagnostics, sqlRunResult, sqlException =
+        compileScenario
+            sqlRoot
+            "module User\nlet executor (_: string) (_: (string * obj) list) = async { return Some(Map.ofList [ \"id\", box 1; \"name\", box \"Ada\" ]) }\nlet queryResult: Async<MyApp.Data.GetUserByIdRow option> = MyApp.Data.Queries.getUserById executor 1"
+            (Path.Combine(sqlRoot, "GetUserById.sql"))
+            "-- name: GetUserById\nselect id, name\nfrom users\nwhere id = @id;"
+            (scenarioAnalyzerConfig [ "[*.sql]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = sql\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Data\nbuild_metadata.AdditionalFiles.SqlResultColumns = id:int,name:string" ])
+            (SqlQueryGenerator())
+            []
+
+    Assert.Empty sqlRunResult.Diagnostics
+    Assert.Empty(sqlDiagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
+    Assert.Null sqlException

@@ -18,6 +18,13 @@ module FSharpIncrementalValueProvider =
     let map (mapping: 'T -> 'U) (provider: FSharpIncrementalValueProvider<'T>) =
         { Evaluate = fun snapshot -> provider.Evaluate snapshot |> mapping }
 
+    let map2
+        (mapping: 'T -> 'U -> 'V)
+        (first: FSharpIncrementalValueProvider<'T>)
+        (second: FSharpIncrementalValueProvider<'U>)
+        =
+        { Evaluate = fun snapshot -> mapping (first.Evaluate snapshot) (second.Evaluate snapshot) }
+
     let bind (mapping: 'T -> FSharpIncrementalValueProvider<'U>) (provider: FSharpIncrementalValueProvider<'T>) =
         { Evaluate =
             fun snapshot ->
@@ -37,6 +44,23 @@ module FSharpIncrementalValuesProvider =
 
     let collect (mapping: 'T -> seq<'U>) (provider: FSharpIncrementalValuesProvider<'T>) =
         { EvaluateMany = fun snapshot -> provider.EvaluateMany snapshot |> Seq.collect mapping }
+
+    let collectToValue (provider: FSharpIncrementalValuesProvider<'T>) =
+        { Evaluate = fun snapshot -> provider.EvaluateMany snapshot |> Seq.toList }
+
+    let wherePathExtension (extension: string) (provider: FSharpIncrementalValuesProvider<FSharpAdditionalFileInput>) =
+        let normalized =
+            if extension.StartsWith(".", StringComparison.Ordinal) then extension else "." + extension
+
+        provider
+        |> filter (fun file -> file.Path.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
+
+    let whereKind (kind: string) (provider: FSharpIncrementalValuesProvider<FSharpAdditionalFileInput>) =
+        provider
+        |> filter (fun file ->
+            match file.Kind with
+            | Some value -> value.Equals(kind, StringComparison.OrdinalIgnoreCase)
+            | None -> false)
 
 type FSharpPostInitializationContext
     internal
@@ -106,6 +130,7 @@ type FSharpIncrementalGeneratorInitializationContext
         projectOptionsProvider: FSharpIncrementalValueProvider<FSharpGeneratorProjectSnapshot>,
         sourceFilesProvider: FSharpIncrementalValuesProvider<FSharpSourceFileInput>,
         additionalTextsProvider: FSharpIncrementalValuesProvider<FSharpAdditionalTextInput>,
+        additionalFilesProvider: FSharpIncrementalValuesProvider<FSharpAdditionalFileInput>,
         analyzerConfigOptionsProvider: FSharpIncrementalValueProvider<FSharpAnalyzerConfigOptions>,
         postInitOutputs: ResizeArray<Action<FSharpPostInitializationContext>>,
         sourceOutputs: ResizeArray<RegisteredSourceOutput>
@@ -113,6 +138,7 @@ type FSharpIncrementalGeneratorInitializationContext
     member _.ProjectOptionsProvider = projectOptionsProvider
     member _.SourceFilesProvider = sourceFilesProvider
     member _.AdditionalTextsProvider = additionalTextsProvider
+    member _.AdditionalFilesProvider = additionalFilesProvider
     member _.AnalyzerConfigOptionsProvider = analyzerConfigOptionsProvider
 
     member _.RegisterPostInitializationOutput(action: Action<FSharpPostInitializationContext>) =

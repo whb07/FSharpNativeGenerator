@@ -14,7 +14,7 @@ Implement a compiler-hosted, native F# source-generation pipeline that:
 
 * Lets generators add `.fs` and generated `.fsi` source files to an F# project.
 * Keeps generation additive and deterministic.
-* Works from `fsc`, MSBuild, and FSharp.Compiler.Service/F# IDE hosts.
+* Ultimately works from `fsc`, MSBuild, and FSharp.Compiler.Service/F# IDE hosts. The first useful MVP does not require a separate standalone CLI; it should prove the host/adapter/loader path through FSharp.Compiler.Service first.
 * Uses F# compiler concepts instead of Roslyn `Compilation` or `SyntaxTree`.
 * Preserves F# source-file ordering semantics.
 * Gives the compiler and IDE stable generated paths, diagnostics, and run results.
@@ -523,6 +523,16 @@ Prefer reusing existing analyzer/additional-file/editorconfig plumbing where
 possible. New names should be F#-specific only when the existing analyzer
 surface cannot represent F# placement and generated-source output.
 
+A standalone source-generator CLI is **not required for the first useful MVP**.
+The MVP should focus on the reusable compiler/FCS host path: load generator
+assemblies, adapt `IFSharpIncrementalGenerator`, run through `FSharpChecker`,
+and prove that generated files participate in parse/check/compile. A CLI can be
+added later as a thin smoke-test/debugging wrapper over the same host facade.
+
+Command-line `fsc` support remains an eventual integration point, but it should
+not be used as the first validation mechanism if doing so delays the core
+library/host correctness work.
+
 Proposed compiler options:
 
 ```text
@@ -676,26 +686,35 @@ updated generated source changes FCS project cache identity
 MSBuild item loads generator
 NuGet analyzer-folder generator loads
 emit generated files writes configured obj path
-command-line fsc works without MSBuild
 IDE/FCS parse/check sees generated files
+host facade compile path sees generated files
+command-line fsc works without MSBuild (post-MVP integration)
+standalone CLI smoke test works (deferred, optional)
 cancellation is observed during generator execution
 ```
 
 ## MVP Implementation Order
 
-1. Add public abstractions and internal driver skeleton.
+The first useful MVP should avoid a standalone CLI and should not depend on
+command-line `fsc` integration. It should be validated through the reusable
+host/FCS path, because that is the same core path later used by MSBuild, IDEs,
+and any optional CLI wrapper.
+
+1. Add public abstractions and internal driver/host skeleton.
 2. Add generator assembly loading/discovery.
-3. Implement immutable driver initialization and broad-invalidation incremental
-   graph execution.
+3. Implement immutable initialization and broad-invalidation incremental graph
+   execution.
 4. Implement post-init/prelude output.
 5. Implement explicit source output placement and ordering validation.
-6. Add generated-source store and update `FSharpProjectOptions.SourceFiles`.
-7. Integrate with command-line `fsc`.
-8. Add diagnostics and optional generated-file emission.
+6. Add generated-source store/overlay integration and update project source
+   ordering through the host/FCS path.
+7. Add diagnostics and optional generated-file emission.
+8. Add FCS/IDE integration and project cache identity tests.
 9. Add MSBuild item/property plumbing.
-10. Add FCS/IDE integration and project cache identity tests.
-11. Replace broad invalidation with real incremental caching.
-12. Consider semantic providers only after parse/additional-file scenarios are
+10. Integrate with command-line `fsc` once the host path is proven.
+11. Add an optional standalone CLI only as a thin smoke-test/debugging wrapper.
+12. Replace broad invalidation with real incremental caching.
+13. Consider semantic providers only after parse/additional-file scenarios are
     stable.
 
 This gives F# a native source-generation design that can plausibly work with the
