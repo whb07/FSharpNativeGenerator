@@ -338,3 +338,69 @@ let Host_AdditionalFileChangeInvalidatesForkRunCache () =
     Assert.False second.CacheHit
     Assert.Contains(first.GeneratedSources, fun source -> source.HintName = "FirstModule")
     Assert.Contains(second.GeneratedSources, fun source -> source.HintName = "SecondModule")
+
+[<FSharpGenerator>]
+type InitializeCountingGenerator(counter: int ref) =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            counter.Value <- counter.Value + 1
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpGeneratorProjectSnapshot>(fun productionContext _ ->
+                    productionContext.AddImplementationSource("Counted", "module Counted", Prelude))
+            )
+
+[<Fact>]
+let Adapter_InitializesOncePerAdapterInstance () =
+    let root = tempRoot ()
+    let counter = ref 0
+    let adapter = IncrementalGeneratorAdapter(InitializeCountingGenerator(counter), "Tests/InitializeOnce") :> IFSharpSourceGenerator
+    let ctx = context root [ Path.Combine(root, "User.fs") ] Map.empty []
+
+    adapter.Generate ctx |> ignore
+    adapter.Generate ctx |> ignore
+
+    Assert.Equal(1, counter.Value)
+
+[<Fact>]
+let Placement_KindExtensionMismatchRejected () =
+    let source =
+        { GeneratorId = "g"
+          HintName = "BadSignature"
+          FileName = "BadSignature.fs"
+          SourceText = "module BadSignature"
+          Kind = FSharpGeneratedSourceKind.Signature
+          Placement = Prelude
+          CompanionImplementationHintName = None }
+
+    let diagnostics = expectError (FSharpGeneratedSourcePlacementResolver.resolve [ "A.fs" ] [] [ source ])
+    Assert.Contains(diagnostics, fun diagnostic -> diagnostic.Id = "FSG0013")
+
+[<Fact>]
+let Placement_UserImplementationSignatureRejected () =
+    let source =
+        { GeneratorId = "g"
+          HintName = "DomainSig"
+          FileName = "DomainSig.fsi"
+          SourceText = "module Domain"
+          Kind = FSharpGeneratedSourceKind.Signature
+          Placement = Prelude
+          CompanionImplementationHintName = Some "Domain" }
+
+    let diagnostics = expectError (FSharpGeneratedSourcePlacementResolver.resolve [ "Domain.fs" ] [] [ source ])
+    Assert.Contains(diagnostics, fun diagnostic -> diagnostic.Id = "FSG0014")
+
+[<Fact>]
+let Configuration_ParseCommandLineLikeArgumentsSplitsKnownSwitchesAndRemainingArgs () =
+    let config, remaining, diagnostics =
+        FSharpSourceGeneratorConfiguration.parseCommandLineLikeArguments
+            [ "--define:TRACE"
+              "--fsharp-source-generator:/tmp/generator.dll"
+              "--fsharp-generator-additional-file:/tmp/schema.json"
+              "--fsharp-source-generator-analyzer-config:/tmp/.editorconfig" ]
+
+    Assert.Empty diagnostics
+    Assert.Equal<string list>([ "/tmp/generator.dll" ], config.GeneratorPaths)
+    Assert.Equal<string list>([ "/tmp/schema.json" ], config.AdditionalFilePaths)
+    Assert.Equal<string list>([ "/tmp/.editorconfig" ], config.AnalyzerConfigPaths)
+    Assert.Equal<string list>([ "--define:TRACE" ], remaining)
