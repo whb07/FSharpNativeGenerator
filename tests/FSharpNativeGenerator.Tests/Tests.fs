@@ -1085,3 +1085,26 @@ build_metadata.AdditionalFiles.SqlParameterTypes = id:int" ])
     Assert.Empty sqlRunResult.Diagnostics
     Assert.Empty(sqlDiagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
     Assert.Null sqlException
+
+[<FSharpGenerator>]
+type FilePathDiagnosticGenerator(path: string) =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpGeneratorProjectSnapshot>(fun productionContext _ ->
+                    productionContext.ReportDiagnostic(
+                        { FSharpGeneratorDiagnostic.create "TESTFILEPATH" "diagnostic with file path" FSharpDiagnosticSeverity.Warning with
+                            FilePath = Some path }))
+            )
+
+[<Fact>]
+let Adapter_FilePathDiagnosticFallbackPrefixesMessage () =
+    let root = tempRoot ()
+    let diagnosticPath = Path.Combine(root, "settings.json")
+    let adapter = IncrementalGeneratorAdapter(FilePathDiagnosticGenerator(diagnosticPath), "Tests/FilePathDiagnostic") :> IFSharpSourceGenerator
+    let output = adapter.Generate(context root [ Path.Combine(root, "User.fs") ] Map.empty [])
+
+    let diagnostic = Assert.Single output.Diagnostics
+    Assert.Equal("TESTFILEPATH", diagnostic.Id)
+    Assert.StartsWith(diagnosticPath + ":", diagnostic.Message, StringComparison.Ordinal)
