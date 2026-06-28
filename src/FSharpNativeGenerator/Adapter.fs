@@ -6,7 +6,7 @@ open System.IO
 open FSharp.Compiler.Diagnostics
 
 [<Sealed>]
-type IncrementalGeneratorAdapter(inner: IFSharpIncrementalGenerator, generatorId: string) =
+type IncrementalGeneratorAdapter(inner: IFSharpIncrementalGenerator, generatorId: string, ?analyzerConfigOptions: FSharpAnalyzerConfigOptions) =
     let initLock = obj()
     let mutable initialized = false
     let mutable initializationDiagnostic: FSharpSourceGeneratorDiagnostic option = None
@@ -178,7 +178,7 @@ type IncrementalGeneratorAdapter(inner: IFSharpIncrementalGenerator, generatorId
                     )
 
             let snapshot = snapshotFromContext ctx
-            let analyzerOptions = FSharpAnalyzerConfigSupport.getForProjectDirectory projectDirectory
+            let analyzerOptions = defaultArg analyzerConfigOptions FSharpAnalyzerConfigSupport.emptyOptions
 
             for output in sourceOutputs do
                 let productionContext = FSharpSourceProductionContext(pending, diagnostics, ctx.CancellationToken, createFileName)

@@ -709,7 +709,11 @@ let Scenario_JsonAdditionalFileGeneratesTypedRecordVisibleToUserCode () =
     let additional = Path.Combine(root, "appsettings.json")
     let userFile = Path.Combine(root, "User.fs")
     let analyzer = Path.Combine(root, ".editorconfig")
-    writeFile userFile "module User\nlet parsed = MyApp.Config.AppSettingsLoader.parse \"{ \\\"serviceName\\\": \\\"orders\\\", \\\"retryCount\\\": 3, \\\"features\\\": { \\\"audit\\\": true } }\"\nlet serviceName: string = parsed.ServiceName\nlet retryCount: int = parsed.RetryCount\nlet audit: bool = parsed.Features.Audit"
+    writeFile userFile """module User
+let parsed = MyApp.Config.AppSettingsLoader.parse "{ \"serviceName\": \"orders\", \"retryCount\": 3, \"features\": { \"audit\": true } }"
+let serviceName: string = parsed.ServiceName
+let retryCount: int = parsed.RetryCount
+let audit: bool = parsed.Features.Audit"""
     writeFile additional """{ "serviceName": "orders", "retryCount": 3, "features": { "audit": true } }"""
     writeFile analyzer (
         scenarioAnalyzerConfig
@@ -717,7 +721,7 @@ let Scenario_JsonAdditionalFileGeneratesTypedRecordVisibleToUserCode () =
 
     let checker = FSharpChecker.Create()
     let host = FSharpGeneratorHost(checker)
-    let options = projectOptions checker root [ userFile ]
+    let options = projectOptionsWithReferences checker root [ userFile ] [ typeof<System.Text.Json.JsonDocument>.Assembly.Location ]
     let results, runResult =
         host.ParseAndCheck(options, [ loaded (JsonConfigGenerator()) "Tests/JsonScenario" ], generatorOptionsWithAnalyzerConfigs root [ additional ] [ analyzer ])
         |> Async.RunSynchronously
@@ -747,7 +751,10 @@ let Scenario_OpenApiGeneratesClientAndDtoVisibleToUserCode () =
     let additional = Path.Combine(root, "petstore.openapi.json")
     let userFile = Path.Combine(root, "User.fs")
     let analyzer = Path.Combine(root, ".editorconfig")
-    writeFile userFile "module User\nlet pet: MyApp.Api.Pet = { Id = 1L; Name = \"Milo\" }\nlet client = MyApp.Api.PetStoreClient(fun _ -> async { return \"{ \\\"name\\\": \\\"Milo\\\" }\" })\nlet loadedPet: Async<MyApp.Api.Pet> = client.GetPetById 1L"
+    writeFile userFile """module User
+let pet: MyApp.Api.Pet = { Id = 1L; Name = "Milo" }
+let client = MyApp.Api.PetStoreClient(fun _ -> async { return "{ \"name\": \"Milo\" }" })
+let loadedPet: Async<MyApp.Api.Pet> = client.GetPetById 1L"""
     writeFile additional """{ "openapi": "3.0.0", "components": { "schemas": { "Pet": { "type": "object", "properties": { "id": { "type": "integer", "format": "int64" }, "name": { "type": "string" } } } } }, "paths": { "/pets/{id}": { "get": { "operationId": "getPetById", "responses": { "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } } } } } } } } }"""
     writeFile analyzer (
         scenarioAnalyzerConfig
@@ -828,11 +835,22 @@ let Scenario_SqlFileGeneratesTypedQueryVisibleToUserCode () =
     let additional = Path.Combine(root, "GetUserById.sql")
     let userFile = Path.Combine(root, "User.fs")
     let analyzer = Path.Combine(root, ".editorconfig")
-    writeFile userFile "module User\nlet row: MyApp.Data.GetUserByIdRow = { Id = 1; Name = \"Ada\"; Email = None }\nlet executor (_: string) (_: (string * obj) list) = async { return Some(Map.ofList [ \"id\", box 1; \"name\", box \"Ada\"; \"email\", box (Some \"a@example.com\") ]) }\nlet queryResult: Async<MyApp.Data.GetUserByIdRow option> = MyApp.Data.Queries.getUserById executor 1"
-    writeFile additional "-- name: GetUserById\n-- result: one\nselect id, name, email\nfrom users\nwhere id = @id;"
+    writeFile userFile """module User
+let row: MyApp.Data.GetUserByIdRow = { Id = 1; Name = "Ada"; Email = None }
+let executor (_: string) (_: (string * obj) list) = async { return Some(Map.ofList [ "id", box 1; "name", box "Ada"; "email", box (Some "a@example.com") ]) }
+let queryResult: Async<MyApp.Data.GetUserByIdRow option> = MyApp.Data.Queries.getUserById executor 1"""
+    writeFile additional "-- name: GetUserById
+-- result: one
+select id, name, email
+from users
+where id = @id;"
     writeFile analyzer (
         scenarioAnalyzerConfig
-            [ "[*.sql]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = sql\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Data\nbuild_metadata.AdditionalFiles.SqlResultColumns = id:int,name:string,email:string option" ])
+            [ "[*.sql]
+build_metadata.AdditionalFiles.FSharpGeneratorKind = sql
+build_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Data
+build_metadata.AdditionalFiles.SqlResultColumns = id:int,name:string,email:string option
+build_metadata.AdditionalFiles.SqlParameterTypes = id:int" ])
 
     let checker = FSharpChecker.Create()
     let host = FSharpGeneratorHost(checker)
@@ -929,18 +947,84 @@ let Scenario_AnalyzerConfigContentChangeInvalidatesForkRunCache () =
     Assert.Contains(first.GeneratedSources, fun source -> source.SourceText.Contains("namespace First.Config", StringComparison.Ordinal))
     Assert.Contains(second.GeneratedSources, fun source -> source.SourceText.Contains("namespace Second.Config", StringComparison.Ordinal))
 
+
+[<Fact>]
+let Scenario_OpenApiYamlReportsExplicitUnsupportedDiagnostic () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "petstore.openapi.yaml")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            "openapi: 3.0.0"
+            (scenarioAnalyzerConfig [ "[*.openapi.yaml]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = openapi" ])
+            (OpenApiClientGenerator())
+
+    Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSGOPENAPI0003" && diagnostic.Message.Contains(additional, StringComparison.Ordinal))
+
+[<Fact>]
+let Scenario_CHeaderConstCharPointerArgumentIsGeneratedAsString () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "strings.h")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            "int puts_name(const char* name);"
+            (scenarioAnalyzerConfig [ "[*.h]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = c-header\nbuild_metadata.AdditionalFiles.NativeLibraryName = simple" ])
+            (NativeHeaderBindingGenerator())
+
+    Assert.Empty result.Diagnostics
+    let source = Assert.Single result.GeneratedSources
+    Assert.Contains("extern int PutsName(string name)", source.SourceText)
+
+[<Fact>]
+let Scenario_CHeaderUnsupportedArgumentReportsDiagnosticInsteadOfDroppingArgument () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "unsupported-arg.h")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            "int bad(unsigned value);"
+            (scenarioAnalyzerConfig [ "[*.h]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = c-header\nbuild_metadata.AdditionalFiles.NativeLibraryName = simple" ])
+            (NativeHeaderBindingGenerator())
+
+    Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSGNATIVE0001" && diagnostic.Message.Contains("unsigned", StringComparison.Ordinal))
+    Assert.Empty result.GeneratedSources
+
+[<Fact>]
+let Scenario_SqlMissingParameterTypeReportsDiagnostic () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "GetUserById.sql")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            "-- name: GetUserById\nselect id\nfrom users\nwhere id = @id;"
+            (scenarioAnalyzerConfig [ "[*.sql]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = sql\nbuild_metadata.AdditionalFiles.SqlResultColumns = id:int" ])
+            (SqlQueryGenerator())
+
+    Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSGSQL0003" && diagnostic.Message.Contains("@id", StringComparison.Ordinal))
+
 [<Fact>]
 let Scenario_CompilePathWorksForJsonOpenApiNativeAndSqlExamples () =
     let jsonRoot = tempRoot ()
     let jsonDiagnostics, jsonRunResult, jsonException =
         compileScenario
             jsonRoot
-            "module User\nlet parsed = MyApp.Config.AppSettingsLoader.parse \"{ \\\"serviceName\\\": \\\"orders\\\", \\\"retryCount\\\": 3, \\\"features\\\": { \\\"audit\\\": true } }\"\nlet audit: bool = parsed.Features.Audit"
+            """module User
+let parsed = MyApp.Config.AppSettingsLoader.parse "{ \"serviceName\": \"orders\", \"retryCount\": 3, \"features\": { \"audit\": true } }"
+let audit: bool = parsed.Features.Audit"""
             (Path.Combine(jsonRoot, "appsettings.json"))
             """{ "serviceName": "orders", "retryCount": 3, "features": { "audit": true } }"""
             (scenarioAnalyzerConfig [ "[*.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = json\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Config\nbuild_metadata.AdditionalFiles.JsonRootType = AppSettings" ])
             (JsonConfigGenerator())
-            []
+            [ typeof<System.Text.Json.JsonDocument>.Assembly.Location ]
 
     Assert.Empty jsonRunResult.Diagnostics
     Assert.Empty(jsonDiagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
@@ -950,7 +1034,9 @@ let Scenario_CompilePathWorksForJsonOpenApiNativeAndSqlExamples () =
     let openApiDiagnostics, openApiRunResult, openApiException =
         compileScenario
             openApiRoot
-            "module User\nlet client = MyApp.Api.PetStoreClient(fun _ -> async { return \"{ \\\"name\\\": \\\"Milo\\\" }\" })\nlet loadedPet: Async<MyApp.Api.Pet> = client.GetPetById 1L"
+            """module User
+let client = MyApp.Api.PetStoreClient(fun _ -> async { return "{ \"name\": \"Milo\" }" })
+let loadedPet: Async<MyApp.Api.Pet> = client.GetPetById 1L"""
             (Path.Combine(openApiRoot, "petstore.openapi.json"))
             """{ "openapi": "3.0.0", "components": { "schemas": { "Pet": { "type": "object", "properties": { "id": { "type": "integer", "format": "int64" }, "name": { "type": "string" } } } } }, "paths": { "/pets/{id}": { "get": { "operationId": "getPetById", "responses": { "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } } } } } } } } }"""
             (scenarioAnalyzerConfig [ "[*.openapi.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = openapi\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Api\nbuild_metadata.AdditionalFiles.OpenApiClientName = PetStoreClient" ])
@@ -980,10 +1066,19 @@ let Scenario_CompilePathWorksForJsonOpenApiNativeAndSqlExamples () =
     let sqlDiagnostics, sqlRunResult, sqlException =
         compileScenario
             sqlRoot
-            "module User\nlet executor (_: string) (_: (string * obj) list) = async { return Some(Map.ofList [ \"id\", box 1; \"name\", box \"Ada\" ]) }\nlet queryResult: Async<MyApp.Data.GetUserByIdRow option> = MyApp.Data.Queries.getUserById executor 1"
+            """module User
+let executor (_: string) (_: (string * obj) list) = async { return Some(Map.ofList [ "id", box 1; "name", box "Ada" ]) }
+let queryResult: Async<MyApp.Data.GetUserByIdRow option> = MyApp.Data.Queries.getUserById executor 1"""
             (Path.Combine(sqlRoot, "GetUserById.sql"))
-            "-- name: GetUserById\nselect id, name\nfrom users\nwhere id = @id;"
-            (scenarioAnalyzerConfig [ "[*.sql]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = sql\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Data\nbuild_metadata.AdditionalFiles.SqlResultColumns = id:int,name:string" ])
+            "-- name: GetUserById
+select id, name
+from users
+where id = @id;"
+            (scenarioAnalyzerConfig [ "[*.sql]
+build_metadata.AdditionalFiles.FSharpGeneratorKind = sql
+build_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Data
+build_metadata.AdditionalFiles.SqlResultColumns = id:int,name:string
+build_metadata.AdditionalFiles.SqlParameterTypes = id:int" ])
             (SqlQueryGenerator())
             []
 

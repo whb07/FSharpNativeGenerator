@@ -1,7 +1,6 @@
 namespace FSharp.Compiler.SourceGeneration
 
 open System
-open System.Collections.Concurrent
 open System.Collections.Generic
 open System.IO
 open System.Reflection
@@ -273,19 +272,6 @@ module internal FSharpAnalyzerConfigSupport =
                             options[kvp.Key] <- kvp.Value
 
                 options :> IReadOnlyDictionary<string, string> }
-
-    let private registry = ConcurrentDictionary<string, FSharpAnalyzerConfigOptions>(StringComparer.OrdinalIgnoreCase)
-
-    let registerForProjectDirectory projectDirectory analyzerConfigPaths =
-        let key = normalizePath projectDirectory
-        registry[key] <- parseFiles analyzerConfigPaths
-
-    let getForProjectDirectory projectDirectory =
-        let key = normalizePath projectDirectory
-
-        match registry.TryGetValue key with
-        | true, options -> options
-        | _ -> emptyOptions
 
     let contentIdentityPath analyzerConfigPaths =
         use sha = SHA256.Create()
