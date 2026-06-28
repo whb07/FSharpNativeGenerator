@@ -32,6 +32,12 @@ module FSharpGeneratedSourcePlacementResolver =
 
         loop otherOptions
 
+    let private normalizePath (path: string) =
+        if String.IsNullOrWhiteSpace path then
+            path
+        else
+            try Path.GetFullPath path with _ -> path
+
     let private extensionMatchesKind (source: PendingGeneratedSource) =
         let extension = Path.GetExtension(source.FileName)
 
@@ -47,8 +53,9 @@ module FSharpGeneratedSourcePlacementResolver =
         : Result<FSharpGeneratedSource list * FSharpSourceGeneratorDiagnostic list, FSharpSourceGeneratorDiagnostic list> =
 
         let diagnostics = ResizeArray<FSharpSourceGeneratorDiagnostic>()
-        let originalSet = HashSet<string>(originalFiles, StringComparer.OrdinalIgnoreCase)
-        let generatedPathSet = HashSet<string>(generated |> List.map _.FileName, StringComparer.OrdinalIgnoreCase)
+        let normalizedOriginals = originalFiles |> List.map normalizePath
+        let originalSet = HashSet<string>(normalizedOriginals, StringComparer.OrdinalIgnoreCase)
+        let generatedPathSet = HashSet<string>(generated |> List.map (fun source -> normalizePath source.FileName), StringComparer.OrdinalIgnoreCase)
         let hints = HashSet<string>(StringComparer.OrdinalIgnoreCase)
 
         for source in generated do
@@ -65,7 +72,9 @@ module FSharpGeneratedSourcePlacementResolver =
 
             match source.Placement with
             | BeforeFile anchor | AfterFile anchor ->
-                if generatedPathSet.Contains anchor || not (originalSet.Contains anchor) then
+                let normalizedAnchor = normalizePath anchor
+
+                if generatedPathSet.Contains normalizedAnchor || not (originalSet.Contains normalizedAnchor) then
                     diagnostics.Add(error "FSG0007" (sprintf "Generated source '%s' references missing or generated placement anchor '%s'." source.HintName anchor))
             | EndOfProject when isApplication otherOptions ->
                 diagnostics.Add(error "FSG0012" (sprintf "Generated source '%s' cannot use EndOfProject placement for an application." source.HintName))
@@ -87,8 +96,8 @@ module FSharpGeneratedSourcePlacementResolver =
                     match firstOriginal with
                     | Some first -> FSharpGeneratedSourceOrder.BeforeFile first
                     | None -> FSharpGeneratedSourceOrder.EndOfProject
-                | BeforeFile anchor -> FSharpGeneratedSourceOrder.BeforeFile anchor
-                | AfterFile anchor -> FSharpGeneratedSourceOrder.AfterFile anchor
+                | BeforeFile anchor -> FSharpGeneratedSourceOrder.BeforeFile(normalizePath anchor)
+                | AfterFile anchor -> FSharpGeneratedSourceOrder.AfterFile(normalizePath anchor)
                 | BeforeLastSourceFile ->
                     match lastImplementation with
                     | Some last -> FSharpGeneratedSourceOrder.BeforeFile last

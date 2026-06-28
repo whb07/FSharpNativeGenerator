@@ -35,3 +35,17 @@ type MissingAttributeGenerator() =
 type UnsupportedApiGenerator() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize _ = ()
+
+[<FSharpGenerator>]
+type ConstructorThrowsGenerator() =
+    do invalidOp "constructor boom"
+
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize _ = ()
+
+[<FSharpGenerator>]
+type NoPublicParameterlessConstructorGenerator private () =
+    new(_: string) = NoPublicParameterlessConstructorGenerator()
+
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize _ = ()

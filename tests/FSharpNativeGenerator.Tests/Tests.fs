@@ -404,3 +404,122 @@ let Configuration_ParseCommandLineLikeArgumentsSplitsKnownSwitchesAndRemainingAr
     Assert.Equal<string list>([ "/tmp/schema.json" ], config.AdditionalFilePaths)
     Assert.Equal<string list>([ "/tmp/.editorconfig" ], config.AnalyzerConfigPaths)
     Assert.Equal<string list>([ "--define:TRACE" ], remaining)
+
+[<FSharpGenerator>]
+type ThrowingInitializationGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize _ = invalidOp "initialize boom"
+
+[<FSharpGenerator>]
+type ThrowingPostInitializationGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterPostInitializationOutput(
+                Action<FSharpPostInitializationContext>(fun _ -> invalidOp "post-init boom")
+            )
+
+[<FSharpGenerator>]
+type ThrowingSourceOutputGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.ProjectOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpGeneratorProjectSnapshot>(fun _ _ -> invalidOp "source-output boom")
+            )
+
+[<FSharpGenerator>]
+type AnalyzerConfigObservingGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize context =
+            context.RegisterSourceOutput(
+                context.AnalyzerConfigOptionsProvider,
+                Action<FSharpSourceProductionContext, FSharpAnalyzerConfigOptions>(fun productionContext options ->
+                    let hasValue = options.GlobalOptions.ContainsKey "build_property.GeneratedModuleName"
+                    let source = if hasValue then "module AnalyzerConfigWasSet" else "module AnalyzerConfigWasEmpty"
+                    productionContext.AddImplementationSource("AnalyzerConfigObservation", source, Prelude))
+            )
+
+[<Fact>]
+let Loader_ConstructorFailureDoesNotHideOtherValidGenerators () =
+    let path = typeof<CliHarnessGenerator>.Assembly.Location
+    let result = FSharpGeneratorAssemblyLoader.loadFromPath path
+
+    Assert.Contains(result.Generators, fun generator -> generator.TypeName.EndsWith("CliHarnessGenerator", StringComparison.Ordinal))
+    Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains("ConstructorThrowsGenerator", StringComparison.Ordinal))
+
+[<Fact>]
+let Loader_RejectsMissingPublicParameterlessConstructor () =
+    let path = typeof<CliHarnessGenerator>.Assembly.Location
+    let result = FSharpGeneratorAssemblyLoader.loadFromPath path
+
+    Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSG0002" && diagnostic.Message.Contains("NoPublicParameterlessConstructorGenerator", StringComparison.Ordinal))
+
+[<Fact>]
+let Adapter_InitializesOnceUnderConcurrentGenerateCalls () =
+    let root = tempRoot ()
+    let counter = ref 0
+    let adapter = IncrementalGeneratorAdapter(InitializeCountingGenerator(counter), "Tests/ConcurrentInitialize") :> IFSharpSourceGenerator
+    let ctx = context root [ Path.Combine(root, "User.fs") ] Map.empty []
+
+    [ 1..16 ]
+    |> List.map (fun _ -> async { return adapter.Generate ctx })
+    |> Async.Parallel
+    |> Async.RunSynchronously
+    |> ignore
+
+    Assert.Equal(1, counter.Value)
+
+[<Fact>]
+let Adapter_InitializationExceptionBecomesDiagnostic () =
+    let root = tempRoot ()
+    let adapter = IncrementalGeneratorAdapter(ThrowingInitializationGenerator(), "Tests/ThrowInit") :> IFSharpSourceGenerator
+    let output = adapter.Generate(context root [ Path.Combine(root, "User.fs") ] Map.empty [])
+
+    Assert.Empty output.GeneratedSources
+    Assert.Contains(output.Diagnostics, fun diagnostic -> diagnostic.Id = "FSG0003" && diagnostic.Message.Contains("initialize boom", StringComparison.Ordinal))
+
+[<Fact>]
+let Adapter_PostInitializationExceptionBecomesDiagnostic () =
+    let root = tempRoot ()
+    let adapter = IncrementalGeneratorAdapter(ThrowingPostInitializationGenerator(), "Tests/ThrowPostInit") :> IFSharpSourceGenerator
+    let output = adapter.Generate(context root [ Path.Combine(root, "User.fs") ] Map.empty [])
+
+    Assert.Empty output.GeneratedSources
+    Assert.Contains(output.Diagnostics, fun diagnostic -> diagnostic.Id = "FSG0004" && diagnostic.Message.Contains("post-init boom", StringComparison.Ordinal))
+
+[<Fact>]
+let Adapter_SourceOutputExceptionBecomesDiagnostic () =
+    let root = tempRoot ()
+    let adapter = IncrementalGeneratorAdapter(ThrowingSourceOutputGenerator(), "Tests/ThrowSource") :> IFSharpSourceGenerator
+    let output = adapter.Generate(context root [ Path.Combine(root, "User.fs") ] Map.empty [])
+
+    Assert.Empty output.GeneratedSources
+    Assert.Contains(output.Diagnostics, fun diagnostic -> diagnostic.Id = "FSG0005" && diagnostic.Message.Contains("source-output boom", StringComparison.Ordinal))
+
+[<Fact>]
+let Adapter_AnalyzerConfigProviderIsDeterministicallyEmptyUntilForkContextCarriesAnalyzerConfigs () =
+    let root = tempRoot ()
+    let adapter = IncrementalGeneratorAdapter(AnalyzerConfigObservingGenerator(), "Tests/AnalyzerConfig") :> IFSharpSourceGenerator
+    let output = adapter.Generate(context root [ Path.Combine(root, "User.fs") ] Map.empty [])
+
+    let source = Assert.Single output.GeneratedSources
+    Assert.Equal("AnalyzerConfigObservation", source.HintName)
+    Assert.Contains("module AnalyzerConfigWasEmpty", source.SourceText)
+
+[<Fact>]
+let Placement_RelativeAnchorMatchesAbsoluteOriginalPath () =
+    let root = tempRoot ()
+    let original = Path.Combine(root, "A.fs")
+    let relativeAnchor = Path.GetRelativePath(Directory.GetCurrentDirectory(), original)
+    let source =
+        { GeneratorId = "g"
+          HintName = "BeforeA"
+          FileName = Path.Combine(root, "BeforeA.fs")
+          SourceText = "module BeforeA"
+          Kind = FSharpGeneratedSourceKind.Implementation
+          Placement = BeforeFile relativeAnchor
+          CompanionImplementationHintName = None }
+
+    let generated, diagnostics = expectOk (FSharpGeneratedSourcePlacementResolver.resolve [ original ] [] [ source ])
+    Assert.Empty diagnostics
+    Assert.Equal(FSharpGeneratedSourceOrder.BeforeFile(Path.GetFullPath relativeAnchor), generated.Head.Order)

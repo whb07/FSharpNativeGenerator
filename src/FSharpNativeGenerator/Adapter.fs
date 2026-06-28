@@ -7,7 +7,9 @@ open FSharp.Compiler.Diagnostics
 
 [<Sealed>]
 type IncrementalGeneratorAdapter(inner: IFSharpIncrementalGenerator, generatorId: string) =
+    let initLock = obj()
     let mutable initialized = false
+    let mutable initializationDiagnostic: FSharpSourceGeneratorDiagnostic option = None
     let postInitOutputs = ResizeArray<Action<FSharpPostInitializationContext>>()
     let sourceOutputs = ResizeArray<RegisteredSourceOutput>()
 
@@ -34,10 +36,26 @@ type IncrementalGeneratorAdapter(inner: IFSharpIncrementalGenerator, generatorId
             postInitOutputs,
             sourceOutputs)
 
+    let error id message =
+        { Id = id
+          Message = message
+          Severity = FSharpDiagnosticSeverity.Error
+          Range = None }
+
+    let exceptionMessage (ex: exn) =
+        if isNull ex.InnerException then ex.Message else ex.InnerException.Message
+
     let ensureInitialized () =
         if not initialized then
-            inner.Initialize initContext
-            initialized <- true
+            lock initLock (fun () ->
+                if not initialized then
+                    try
+                        inner.Initialize initContext
+                    with ex ->
+                        initializationDiagnostic <-
+                            Some(error "FSG0003" (sprintf "Generator '%s' failed during initialization: %s" generatorId (exceptionMessage ex)))
+
+                    initialized <- true)
 
     let sanitizeSegment (value: string) =
         let invalidChars = Path.GetInvalidFileNameChars() |> Set.ofArray
@@ -99,13 +117,31 @@ type IncrementalGeneratorAdapter(inner: IFSharpIncrementalGenerator, generatorId
 
             for action in postInitOutputs do
                 let postContext = FSharpPostInitializationContext(pending, diagnostics, ctx.CancellationToken, createFileName)
-                action.Invoke postContext
+
+                try
+                    action.Invoke postContext
+                with ex ->
+                    diagnostics.Add(
+                        FSharpGeneratorDiagnostic.create
+                            "FSG0004"
+                            (sprintf "Generator '%s' failed during post-initialization output: %s" generatorId (exceptionMessage ex))
+                            FSharpDiagnosticSeverity.Error
+                    )
 
             let snapshot = snapshotFromContext ctx
 
             for output in sourceOutputs do
                 let productionContext = FSharpSourceProductionContext(pending, diagnostics, ctx.CancellationToken, createFileName)
-                output (snapshot, ctx.AdditionalFiles) productionContext
+
+                try
+                    output (snapshot, ctx.AdditionalFiles) productionContext
+                with ex ->
+                    diagnostics.Add(
+                        FSharpGeneratorDiagnostic.create
+                            "FSG0005"
+                            (sprintf "Generator '%s' failed during source output: %s" generatorId (exceptionMessage ex))
+                            FSharpDiagnosticSeverity.Error
+                    )
 
             let pendingWithGeneratorIds =
                 pending
@@ -115,16 +151,20 @@ type IncrementalGeneratorAdapter(inner: IFSharpIncrementalGenerator, generatorId
             let resolved =
                 FSharpGeneratedSourcePlacementResolver.resolve ctx.SourceFiles ctx.OtherOptions pendingWithGeneratorIds
 
+            let initializationDiagnostics = initializationDiagnostic |> Option.toList
+
             match resolved with
             | Ok(generatedSources, placementDiagnostics) ->
                 { GeneratedSources = generatedSources
                   Diagnostics =
-                    [ yield! diagnostics |> Seq.map mapDiagnostic
+                    [ yield! initializationDiagnostics
+                      yield! diagnostics |> Seq.map mapDiagnostic
                       yield! placementDiagnostics ] }
             | Error placementDiagnostics ->
                 { GeneratedSources = []
                   Diagnostics =
-                    [ yield! diagnostics |> Seq.map mapDiagnostic
+                    [ yield! initializationDiagnostics
+                      yield! diagnostics |> Seq.map mapDiagnostic
                       yield! placementDiagnostics ] }
 
     interface IFSharpSourceGeneratorWithId with

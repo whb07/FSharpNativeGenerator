@@ -85,17 +85,29 @@ module FSharpGeneratorAssemblyLoader =
                                     (sprintf "Generator type '%s' must have a public parameterless constructor." typ.FullName)
                             )
                         | ctor ->
-                            let instance = ctor.Invoke [||] :?> IFSharpIncrementalGenerator
-                            let id =
-                                match instance with
-                                | :? IFSharpIncrementalGeneratorWithId as stable -> stable.GeneratorId
-                                | _ -> generatorId assembly typ
+                            try
+                                let instance = ctor.Invoke [||] :?> IFSharpIncrementalGenerator
+                                let id =
+                                    match instance with
+                                    | :? IFSharpIncrementalGeneratorWithId as stable -> stable.GeneratorId
+                                    | _ -> generatorId assembly typ
 
-                            generators.Add
-                                { Generator = instance
-                                  GeneratorId = id
-                                  AssemblyPath = fullPath
-                                  TypeName = typ.FullName }
+                                generators.Add
+                                    { Generator = instance
+                                      GeneratorId = id
+                                      AssemblyPath = fullPath
+                                      TypeName = typ.FullName }
+                            with ex ->
+                                let message =
+                                    match ex with
+                                    | :? TargetInvocationException as invocation when not (isNull invocation.InnerException) -> invocation.InnerException.Message
+                                    | _ -> ex.Message
+
+                                diagnostics.Add(
+                                    FSharpSourceGeneratorDiagnostics.error
+                                        "FSG0002"
+                                        (sprintf "Generator type '%s' could not be constructed: %s" typ.FullName message)
+                                )
                     | Some _, false
                     | None, true ->
                         diagnostics.Add(
