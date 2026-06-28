@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -9,6 +9,7 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisMode>All</AnalysisMode>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>NU1605;NU1504;MSB3277</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,10 +22,11 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/FSharpNativeGenerator/FSharpNativeGenerator.fsproj" />
-    <ProjectReference Include="../FSharpNativeGenerator.TestGenerators/FSharpNativeGenerator.TestGenerators.fsproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../FSharpNativeGenerator.TestGenerators/FSharpNativeGenerator.TestGenerators.fsproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="FSharp.Core" Version="11.0.101-dev" />
     <PackageReference Include="xunit.v3.mtp-v2" Version="3.2.2" />
   </ItemGroup>
 

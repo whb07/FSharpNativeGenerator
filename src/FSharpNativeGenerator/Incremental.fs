@@ -1,16 +1,17 @@
 namespace FSharp.Compiler.SourceGeneration
 
 open System
-open System.Collections.Immutable
 open System.Threading
 
+[<NoComparison; NoEquality>]
 type FSharpIncrementalValueProvider<'T> =
     internal
-        { Evaluate: FSharpGeneratorProjectSnapshot -> 'T }
+        { Evaluate: obj -> 'T }
 
+[<NoComparison; NoEquality>]
 type FSharpIncrementalValuesProvider<'T> =
     internal
-        { EvaluateMany: FSharpGeneratorProjectSnapshot -> seq<'T> }
+        { EvaluateMany: obj -> seq<'T> }
 
 [<RequireQualifiedAccess>]
 module FSharpIncrementalValueProvider =
@@ -37,30 +38,23 @@ module FSharpIncrementalValuesProvider =
     let collect (mapping: 'T -> seq<'U>) (provider: FSharpIncrementalValuesProvider<'T>) =
         { EvaluateMany = fun snapshot -> provider.EvaluateMany snapshot |> Seq.collect mapping }
 
-type internal PendingGeneratedSource =
-    { GeneratorName: string
-      HintName: string
-      Kind: FSharpGeneratedSourceKind
-      SourceText: FSharpSourceText
-      Placement: FSharpGeneratedSourcePlacement
-      CompanionImplementationHintName: string option }
-
 type FSharpPostInitializationContext
     internal
     (
-        generatorName: string,
         pending: ResizeArray<PendingGeneratedSource>,
         diagnostics: ResizeArray<FSharpGeneratorDiagnostic>,
-        cancellationToken: CancellationToken
+        cancellationToken: CancellationToken,
+        createFileName: string -> FSharpGeneratedSourceKind -> string
     ) =
     member _.CancellationToken = cancellationToken
 
-    member _.AddImplementationSource(hintName: string, sourceText: FSharpSourceText) =
+    member _.AddImplementationSource(hintName: string, sourceText: string) =
         pending.Add
-            { GeneratorName = generatorName
+            { GeneratorId = ""
               HintName = hintName
-              Kind = Implementation
+              FileName = createFileName hintName FSharpGeneratedSourceKind.Implementation
               SourceText = sourceText
+              Kind = FSharpGeneratedSourceKind.Implementation
               Placement = Prelude
               CompanionImplementationHintName = None }
 
@@ -69,64 +63,57 @@ type FSharpPostInitializationContext
 type FSharpSourceProductionContext
     internal
     (
-        generatorName: string,
         pending: ResizeArray<PendingGeneratedSource>,
         diagnostics: ResizeArray<FSharpGeneratorDiagnostic>,
-        cancellationToken: CancellationToken
+        cancellationToken: CancellationToken,
+        createFileName: string -> FSharpGeneratedSourceKind -> string
     ) =
     member _.CancellationToken = cancellationToken
 
-    member _.AddImplementationSource
-        (hintName: string, sourceText: FSharpSourceText, placement: FSharpGeneratedSourcePlacement)
-        =
+    member _.AddImplementationSource(hintName: string, sourceText: string, placement: FSharpGeneratedSourcePlacement) =
         pending.Add
-            { GeneratorName = generatorName
+            { GeneratorId = ""
               HintName = hintName
-              Kind = Implementation
+              FileName = createFileName hintName FSharpGeneratedSourceKind.Implementation
               SourceText = sourceText
+              Kind = FSharpGeneratedSourceKind.Implementation
               Placement = placement
               CompanionImplementationHintName = None }
 
     member _.AddSignatureSource
         (
             hintName: string,
-            sourceText: FSharpSourceText,
+            sourceText: string,
             companionImplementationHintName: string,
             placement: FSharpGeneratedSourcePlacement
         ) =
         pending.Add
-            { GeneratorName = generatorName
+            { GeneratorId = ""
               HintName = hintName
-              Kind = Signature
+              FileName = createFileName hintName FSharpGeneratedSourceKind.Signature
               SourceText = sourceText
+              Kind = FSharpGeneratedSourceKind.Signature
               Placement = placement
               CompanionImplementationHintName = Some companionImplementationHintName }
 
     member _.ReportDiagnostic(diagnostic: FSharpGeneratorDiagnostic) = diagnostics.Add diagnostic
 
-type internal RegisteredSourceOutput = FSharpGeneratorProjectSnapshot -> FSharpSourceProductionContext -> unit
+type internal RegisteredSourceOutput = obj -> FSharpSourceProductionContext -> unit
 
 type FSharpIncrementalGeneratorInitializationContext
     internal
     (
-        projectOptionsProvider,
-        sourceFilesProvider,
-        additionalTextsProvider,
-        analyzerConfigOptionsProvider,
+        projectOptionsProvider: FSharpIncrementalValueProvider<FSharpGeneratorProjectSnapshot>,
+        sourceFilesProvider: FSharpIncrementalValuesProvider<FSharpSourceFileInput>,
+        additionalTextsProvider: FSharpIncrementalValuesProvider<FSharpAdditionalTextInput>,
+        analyzerConfigOptionsProvider: FSharpIncrementalValueProvider<FSharpAnalyzerConfigOptions>,
         postInitOutputs: ResizeArray<Action<FSharpPostInitializationContext>>,
         sourceOutputs: ResizeArray<RegisteredSourceOutput>
     ) =
-    member _.ProjectOptionsProvider: FSharpIncrementalValueProvider<FSharpProjectOptions> =
-        projectOptionsProvider
-
-    member _.SourceFilesProvider: FSharpIncrementalValuesProvider<FSharpSourceFileSnapshot> =
-        sourceFilesProvider
-
-    member _.AdditionalTextsProvider: FSharpIncrementalValuesProvider<FSharpAdditionalText> =
-        additionalTextsProvider
-
-    member _.AnalyzerConfigOptionsProvider: FSharpIncrementalValueProvider<FSharpAnalyzerConfigOptions> =
-        analyzerConfigOptionsProvider
+    member _.ProjectOptionsProvider = projectOptionsProvider
+    member _.SourceFilesProvider = sourceFilesProvider
+    member _.AdditionalTextsProvider = additionalTextsProvider
+    member _.AnalyzerConfigOptionsProvider = analyzerConfigOptionsProvider
 
     member _.RegisterPostInitializationOutput(action: Action<FSharpPostInitializationContext>) =
         postInitOutputs.Add action
@@ -134,21 +121,14 @@ type FSharpIncrementalGeneratorInitializationContext
     member _.RegisterSourceOutput<'T>
         (source: FSharpIncrementalValueProvider<'T>, action: Action<FSharpSourceProductionContext, 'T>)
         =
-        sourceOutputs.Add(fun snapshot context -> action.Invoke(context, source.Evaluate snapshot))
+        sourceOutputs.Add(fun state context -> action.Invoke(context, source.Evaluate state))
 
     member _.RegisterSourceOutput<'T>
         (source: FSharpIncrementalValuesProvider<'T>, action: Action<FSharpSourceProductionContext, 'T>)
         =
-        sourceOutputs.Add(fun snapshot context ->
-            for value in source.EvaluateMany snapshot do
+        sourceOutputs.Add(fun state context ->
+            for value in source.EvaluateMany state do
                 action.Invoke(context, value))
 
 type IFSharpIncrementalGenerator =
     abstract Initialize: FSharpIncrementalGeneratorInitializationContext -> unit
-
-type internal RegisteredGenerator =
-    { Generator: IFSharpIncrementalGenerator
-      GeneratorName: string
-      PostInitializationOutputs: ImmutableArray<Action<FSharpPostInitializationContext>>
-      SourceOutputs: ImmutableArray<RegisteredSourceOutput>
-      InitializationDiagnostics: ImmutableArray<FSharpGeneratorDiagnostic> }

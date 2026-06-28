@@ -7,55 +7,31 @@ open FSharp.Compiler.SourceGeneration
 type CliHarnessGenerator() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
-            let moduleNameProvider =
-                context.AnalyzerConfigOptionsProvider
-                |> FSharpIncrementalValueProvider.map (fun options ->
-                    match options.GlobalOptions.TryGetValue("build_property.GeneratedModuleName") with
-                    | true, moduleName -> moduleName
-                    | false, _ -> "GeneratedPrelude")
-
-            context.RegisterSourceOutput(
-                moduleNameProvider,
-                Action<FSharpSourceProductionContext, string>(fun productionContext moduleName ->
-                    productionContext.AddImplementationSource(
-                        moduleName,
-                        FSharpSourceText.OfString("module " + moduleName + "\nlet answer = 42"),
-                        Prelude
-                    ))
+            context.RegisterPostInitializationOutput(
+                Action<FSharpPostInitializationContext>(fun post ->
+                    post.AddImplementationSource("GeneratedPrelude", "module GeneratedPrelude\nlet answer = 42"))
             )
 
 [<FSharpGenerator>]
-type CliSourceTextGenerator() =
+type AdditionalFileGenerator() =
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
-            let markedSourceFiles =
-                context.SourceFilesProvider
-                |> FSharpIncrementalValuesProvider.choose (fun sourceFile ->
-                    if sourceFile.SourceText.Text.Contains("SOURCE_TEXT_MARKER", StringComparison.Ordinal) then
-                        Some "SawRealSourceText"
-                    else
-                        None)
+            let moduleNames =
+                context.AdditionalTextsProvider
+                |> FSharpIncrementalValuesProvider.map (fun additional -> additional.Text.Trim())
+                |> FSharpIncrementalValuesProvider.filter (String.IsNullOrWhiteSpace >> not)
 
             context.RegisterSourceOutput(
-                markedSourceFiles,
+                moduleNames,
                 Action<FSharpSourceProductionContext, string>(fun productionContext moduleName ->
-                    productionContext.AddImplementationSource(
-                        moduleName,
-                        FSharpSourceText.OfString("module " + moduleName + "\nlet value = 1"),
-                        Prelude
-                    ))
+                    productionContext.AddImplementationSource(moduleName, "module " + moduleName + "\nlet value = 1", Prelude))
             )
 
-[<FSharpGenerator>]
-type CliEndOfProjectGenerator() =
+type MissingAttributeGenerator() =
     interface IFSharpIncrementalGenerator with
-        member _.Initialize context =
-            context.RegisterSourceOutput(
-                context.ProjectOptionsProvider,
-                Action<FSharpSourceProductionContext, FSharpProjectOptions>(fun productionContext _ ->
-                    productionContext.AddImplementationSource(
-                        "CliEndOfProject",
-                        FSharpSourceText.OfString("module CliEndOfProject\nlet value = 1"),
-                        EndOfProject
-                    ))
-            )
+        member _.Initialize _ = ()
+
+[<FSharpGenerator(999)>]
+type UnsupportedApiGenerator() =
+    interface IFSharpIncrementalGenerator with
+        member _.Initialize _ = ()

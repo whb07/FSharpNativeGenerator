@@ -1,0 +1,9 @@
+<Project>
+  <!--
+    Root directory of the local F# compiler fork.
+    Override on the command line or in a personal Directory.Build.props.user if your layout differs.
+  -->
+  <PropertyGroup>
+    <FSharpRepoRoot Condition="'$(FSharpRepoRoot)' == ''">$(MSBuildThisFileDirectory)../fsharp</FSharpRepoRoot>
+  </PropertyGroup>
+</Project>

@@ -6,19 +6,25 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisMode>All</AnalysisMode>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>NU1605;NU1504;MSB3277</NoWarn>
+    <TreatPackageDowngradeWarningsAsErrors>false</TreatPackageDowngradeWarningsAsErrors>
+    <WarningsNotAsErrors>NU1605</WarningsNotAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="Types.fs" />
+    <Compile Include="Placement.fs" />
     <Compile Include="Incremental.fs" />
     <Compile Include="LoadingAndConfiguration.fs" />
-    <Compile Include="GeneratedSource.fs" />
-    <Compile Include="CacheIdentity.fs" />
-    <Compile Include="Driver.fs" />
+    <Compile Include="Adapter.fs" />
+    <Compile Include="Host.fs" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="FSharp.Compiler.Service" Version="43.11.301" />
+    <ProjectReference Include="$(FSharpRepoRoot)/src/Compiler/FSharp.Compiler.Service.fsproj">
+      <SetTargetFramework>TargetFramework=netstandard2.0</SetTargetFramework>
+    </ProjectReference>
+    <PackageReference Include="FSharp.Core" Version="11.0.101-dev" />
   </ItemGroup>
 
 </Project>
