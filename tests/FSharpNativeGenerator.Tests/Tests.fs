@@ -38,9 +38,7 @@ let private context root sourceFiles additionalFiles otherOptions =
 
 let private projectOptions (checker: FSharpChecker) root (sourceFiles: string list) =
     let argv =
-        [| yield "fsc.exe"
-           yield "--target:library"
-           yield "--noframework"
+        [| yield "--target:library"
            yield "--warn:3"
            yield "-o:" + Path.Combine(root, "bin", "App.dll")
            yield! sourceFiles |]
@@ -308,8 +306,8 @@ let Host_CompileSucceedsWithGeneratedSymbol () =
     let host = FSharpGeneratorHost(FSharpChecker.Create())
     let argv =
         [| "fsc.exe"
+           "--targetprofile:netcore"
            "--target:library"
-           "--noframework"
            "-o:" + Path.Combine(root, "App.dll")
            userFile |]
 
@@ -317,9 +315,9 @@ let Host_CompileSucceedsWithGeneratedSymbol () =
         host.Compile(argv, [ loaded (GeneratedSymbolGenerator()) "Tests/GeneratedSymbol" ], generatorOptions root [])
         |> Async.RunSynchronously
 
-    Assert.Null exn
     Assert.Empty runResult.Diagnostics
     Assert.Empty(diagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
+    Assert.Null exn
 
 [<Fact>]
 let Host_AdditionalFileChangeInvalidatesForkRunCache () =

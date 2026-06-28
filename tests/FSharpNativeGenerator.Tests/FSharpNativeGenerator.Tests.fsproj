@@ -26,6 +26,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="$(FSharpRepoRoot)/artifacts/bin/FSharp.Core/Debug/netstandard2.1/FSharp.Core.dll" CopyToOutputDirectory="PreserveNewest" Link="FSharp.Core.dll" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="FSharp.Core" Version="11.0.101-dev" />
     <PackageReference Include="xunit.v3.mtp-v2" Version="3.2.2" />
   </ItemGroup>
