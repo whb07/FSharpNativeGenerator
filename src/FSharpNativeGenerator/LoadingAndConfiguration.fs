@@ -7,6 +7,7 @@ open System.Reflection
 open System.Runtime.Loader
 open System.Security.Cryptography
 open System.Text
+open System.Text.RegularExpressions
 open FSharp.Compiler.Diagnostics
 
 module internal FSharpSourceGeneratorDiagnostics =
@@ -167,9 +168,14 @@ module internal FSharpAnalyzerConfigSupport =
         { GlobalOptions = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string>
           GetOptionsForPath = fun _ -> Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string> }
 
+    type private AnalyzerConfigSection =
+        { BaseDirectory: string
+          Pattern: string
+          Options: Dictionary<string, string> }
+
     type private ParsedAnalyzerConfig =
         { GlobalOptions: Dictionary<string, string>
-          Sections: (string * Dictionary<string, string>) list }
+          Sections: AnalyzerConfigSection list }
 
     let private normalizePath (path: string) =
         if String.IsNullOrWhiteSpace path then
@@ -191,37 +197,47 @@ module internal FSharpAnalyzerConfigSupport =
 
             if String.IsNullOrWhiteSpace key then None else Some(key, value)
 
-    let private wildcardMatches (pattern: string) (value: string) =
+    let private normalizeSeparators (value: string) =
+        value.Replace('\\', '/')
+
+    let private globMatches (pattern: string) (value: string) =
         let comparison = StringComparison.OrdinalIgnoreCase
-        let normalizedPattern = pattern.Replace('\\', '/').Trim()
-        let normalizedValue = value.Replace('\\', '/')
+        let normalizedPattern = normalizeSeparators pattern
+        let normalizedValue = normalizeSeparators value
 
-        if normalizedPattern = "*" then
-            true
-        elif not (normalizedPattern.Contains("*", StringComparison.Ordinal)) then
-            normalizedValue.EndsWith(normalizedPattern, comparison)
-            || Path.GetFileName(normalizedValue).Equals(normalizedPattern, comparison)
+        if normalizedPattern.Contains("*", StringComparison.Ordinal) || normalizedPattern.Contains("?", StringComparison.Ordinal) then
+            let regex =
+                "^"
+                + Regex.Escape(normalizedPattern).Replace("\\*", ".*").Replace("\\?", ".")
+                + "$"
+
+            Regex.IsMatch(normalizedValue, regex, RegexOptions.IgnoreCase)
         else
-            let parts = normalizedPattern.Split([| '*' |], StringSplitOptions.RemoveEmptyEntries)
-            let mutable index = 0
-            let mutable matched = true
+            normalizedValue.Equals(normalizedPattern, comparison)
 
-            for part in parts do
-                if matched then
-                    let next = normalizedValue.IndexOf(part, index, comparison)
+    let private sectionMatches (section: AnalyzerConfigSection) path =
+        let pattern = section.Pattern |> normalizeSeparators
+        let fullPath = normalizePath path |> normalizeSeparators
+        let fileName = Path.GetFileName fullPath
+        let relativePath =
+            try Path.GetRelativePath(section.BaseDirectory, normalizePath path) |> normalizeSeparators with _ -> fullPath
 
-                    if next < 0 then
-                        matched <- false
-                    else
-                        index <- next + part.Length
-
-            matched
+        if pattern.Contains("/", StringComparison.Ordinal) then
+            globMatches pattern relativePath || globMatches pattern fullPath || fullPath.EndsWith(pattern, StringComparison.OrdinalIgnoreCase)
+        else
+            globMatches pattern fileName || globMatches pattern fullPath
 
     let private parseFile path =
         let globalOptions = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        let sections = ResizeArray<string * Dictionary<string, string>>()
+        let sections = ResizeArray<AnalyzerConfigSection>()
         let mutable current: Dictionary<string, string> option = None
-        let mutable currentPattern = ""
+        let baseDirectory =
+            try
+                let fullPath = normalizePath path
+                let directory = Path.GetDirectoryName fullPath
+                if isNull directory then Directory.GetCurrentDirectory() else directory
+            with _ ->
+                Directory.GetCurrentDirectory()
 
         if File.Exists path then
             for rawLine in File.ReadAllLines path do
@@ -234,8 +250,11 @@ module internal FSharpAnalyzerConfigSupport =
                 then
                     if line.StartsWith("[", StringComparison.Ordinal) && line.EndsWith("]", StringComparison.Ordinal) then
                         let section = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                        currentPattern <- trimSection line
-                        sections.Add(currentPattern, section)
+                        sections.Add(
+                            { BaseDirectory = baseDirectory
+                              Pattern = trimSection line
+                              Options = section }
+                        )
                         current <- Some section
                     else
                         match trySplitKeyValue line with
@@ -266,9 +285,9 @@ module internal FSharpAnalyzerConfigSupport =
                 let fullPath = normalizePath path
                 let options = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
 
-                for pattern, section in sections do
-                    if wildcardMatches pattern fullPath then
-                        for kvp in section do
+                for section in sections do
+                    if sectionMatches section fullPath then
+                        for kvp in section.Options do
                             options[kvp.Key] <- kvp.Value
 
                 options :> IReadOnlyDictionary<string, string> }

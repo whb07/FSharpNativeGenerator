@@ -7,7 +7,7 @@ open System.Threading
 open FSharp.Compiler.CodeAnalysis
 open FSharp.Compiler.Diagnostics
 open FSharp.Compiler.SourceGeneration
-open FSharp.Compiler.SourceGeneration.Examples
+open FSharpNativeGenerator.ScenarioGenerators
 open FSharpNativeGenerator.TestGenerators
 open Xunit
 
@@ -762,13 +762,15 @@ let loadedPet: Async<MyApp.Api.Pet> = client.GetPetById 1L"""
 
     let checker = FSharpChecker.Create()
     let host = FSharpGeneratorHost(checker)
-    let options = projectOptions checker root [ userFile ]
+    let options = projectOptionsWithReferences checker root [ userFile ] [ typeof<System.Text.Json.JsonDocument>.Assembly.Location ]
     let results, runResult =
         host.ParseAndCheck(options, [ loaded (OpenApiClientGenerator()) "Tests/OpenApiScenario" ], generatorOptionsWithAnalyzerConfigs root [ additional ] [ analyzer ])
         |> Async.RunSynchronously
 
     Assert.Empty runResult.Diagnostics
     Assert.Contains(runResult.GeneratedSources, fun source -> source.SourceText.Contains("type PetStoreClient", StringComparison.Ordinal))
+    Assert.Contains(runResult.GeneratedSources, fun source -> source.SourceText.Contains("JsonSerializer.Deserialize", StringComparison.Ordinal))
+    Assert.DoesNotContain(runResult.GeneratedSources, fun source -> source.SourceText.Contains("Unchecked.defaultof", StringComparison.Ordinal))
     Assert.Empty(results.Diagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
 
 [<Fact>]
@@ -785,6 +787,22 @@ let Scenario_OpenApiDuplicateOperationIdsReportDiagnostic () =
             (OpenApiClientGenerator())
 
     Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSGOPENAPI0002" && diagnostic.Message.Contains(additional, StringComparison.Ordinal))
+
+[<Fact>]
+let Scenario_OpenApiUnsupportedResponseShapeReportsDiagnostic () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "unsupported.openapi.json")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            """{ "openapi": "3.0.0", "paths": { "/pets/{id}": { "get": { "operationId": "getPetById", "responses": { "204": { "description": "No content" } } } } } }"""
+            (scenarioAnalyzerConfig [ "[*.openapi.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = openapi" ])
+            (OpenApiClientGenerator())
+
+    Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSGOPENAPI0004" && diagnostic.Message.Contains("response schema reference", StringComparison.Ordinal))
+    Assert.Empty result.GeneratedSources
 
 [<Fact>]
 let Scenario_CHeaderGeneratesNativeExterns () =
@@ -861,6 +879,8 @@ build_metadata.AdditionalFiles.SqlParameterTypes = id:int" ])
 
     Assert.Empty runResult.Diagnostics
     Assert.Contains(runResult.GeneratedSources, fun source -> source.SourceText.Contains("type GetUserByIdRow", StringComparison.Ordinal))
+    Assert.Contains(runResult.GeneratedSources, fun source -> source.SourceText.Contains("execute sqlText parameters", StringComparison.Ordinal))
+    Assert.DoesNotContain(runResult.GeneratedSources, fun source -> source.SourceText.Contains("return None", StringComparison.Ordinal))
     Assert.Empty(results.Diagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))
 
 [<Fact>]
@@ -894,6 +914,23 @@ let Scenario_AnalyzerConfigMetadataChangesGeneratedNamespace () =
     let source = Assert.Single result.GeneratedSources
     Assert.Contains("namespace Custom.Config", source.SourceText)
     Assert.Contains("type Settings", source.SourceText)
+
+[<Fact>]
+let Scenario_JsonPropertyNamesAreEscapedInGeneratedSource () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "settings.json")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            """{ "quoted\"name": "demo" }"""
+            (scenarioAnalyzerConfig [ "[*.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = json\nbuild_metadata.AdditionalFiles.JsonRootType = Settings" ])
+            (JsonConfigGenerator())
+
+    Assert.Empty result.Diagnostics
+    let source = Assert.Single result.GeneratedSources
+    Assert.Contains("quoted\\\"name", source.SourceText)
 
 [<Fact>]
 let Scenario_StableHintNamesDoNotCollideForSameFileNameInDifferentDirectories () =
@@ -981,6 +1018,23 @@ let Scenario_CHeaderConstCharPointerArgumentIsGeneratedAsString () =
     Assert.Contains("extern int PutsName(string name)", source.SourceText)
 
 [<Fact>]
+let Scenario_CHeaderLibraryNameIsEscapedInGeneratedSource () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "strings.h")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            "int puts_name(const char* name);"
+            (scenarioAnalyzerConfig [ "[*.h]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = c-header\nbuild_metadata.AdditionalFiles.NativeLibraryName = quoted\"native" ])
+            (NativeHeaderBindingGenerator())
+
+    Assert.Empty result.Diagnostics
+    let source = Assert.Single result.GeneratedSources
+    Assert.Contains("quoted\\\"native", source.SourceText)
+
+[<Fact>]
 let Scenario_CHeaderUnsupportedArgumentReportsDiagnosticInsteadOfDroppingArgument () =
     let root = tempRoot ()
     let additional = Path.Combine(root, "unsupported-arg.h")
@@ -1012,6 +1066,21 @@ let Scenario_SqlMissingParameterTypeReportsDiagnostic () =
     Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSGSQL0003" && diagnostic.Message.Contains("@id", StringComparison.Ordinal))
 
 [<Fact>]
+let Scenario_SqlUnsupportedMetadataTypeReportsDiagnostic () =
+    let root = tempRoot ()
+    let additional = Path.Combine(root, "GetUserById.sql")
+    let result =
+        runScenarioGenerator
+            root
+            "module User"
+            additional
+            "-- name: GetUserById\nselect id\nfrom users\nwhere id = @id;"
+            (scenarioAnalyzerConfig [ "[*.sql]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = sql\nbuild_metadata.AdditionalFiles.SqlResultColumns = id:System.Guid\nbuild_metadata.AdditionalFiles.SqlParameterTypes = id:int" ])
+            (SqlQueryGenerator())
+
+    Assert.Contains(result.Diagnostics, fun diagnostic -> diagnostic.Id = "FSGSQL0004" && diagnostic.Message.Contains("System.Guid", StringComparison.Ordinal))
+
+[<Fact>]
 let Scenario_CompilePathWorksForJsonOpenApiNativeAndSqlExamples () =
     let jsonRoot = tempRoot ()
     let jsonDiagnostics, jsonRunResult, jsonException =
@@ -1041,7 +1110,7 @@ let loadedPet: Async<MyApp.Api.Pet> = client.GetPetById 1L"""
             """{ "openapi": "3.0.0", "components": { "schemas": { "Pet": { "type": "object", "properties": { "id": { "type": "integer", "format": "int64" }, "name": { "type": "string" } } } } }, "paths": { "/pets/{id}": { "get": { "operationId": "getPetById", "responses": { "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } } } } } } } } }"""
             (scenarioAnalyzerConfig [ "[*.openapi.json]\nbuild_metadata.AdditionalFiles.FSharpGeneratorKind = openapi\nbuild_metadata.AdditionalFiles.FSharpGeneratorNamespace = MyApp.Api\nbuild_metadata.AdditionalFiles.OpenApiClientName = PetStoreClient" ])
             (OpenApiClientGenerator())
-            []
+            [ typeof<System.Text.Json.JsonDocument>.Assembly.Location ]
 
     Assert.Empty openApiRunResult.Diagnostics
     Assert.Empty(openApiDiagnostics |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error))

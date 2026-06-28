@@ -1,6 +1,7 @@
-namespace FSharp.Compiler.SourceGeneration.Examples
+namespace FSharpNativeGenerator.ScenarioGenerators
 
 open System
+open System.Text
 open System.Text.Json
 open System.Text.RegularExpressions
 open FSharp.Compiler.Diagnostics
@@ -50,6 +51,21 @@ module private ScenarioGeneratorHelpers =
         |> Array.map _.Trim()
         |> Array.filter (String.IsNullOrWhiteSpace >> not)
         |> Array.toList
+
+    let fsharpStringLiteral (value: string) =
+        let builder = StringBuilder(value.Length + 2)
+        builder.Append('"') |> ignore
+
+        for ch in value do
+            match ch with
+            | '\\' -> builder.Append("\\\\") |> ignore
+            | '"' -> builder.Append("\\\"") |> ignore
+            | '\n' -> builder.Append("\\n") |> ignore
+            | '\r' -> builder.Append("\\r") |> ignore
+            | '\t' -> builder.Append("\\t") |> ignore
+            | _ -> builder.Append(ch) |> ignore
+
+        builder.Append('"').ToString()
 
 [<FSharpGenerator>]
 type JsonConfigGenerator() =
@@ -133,14 +149,15 @@ type JsonConfigGenerator() =
             element.EnumerateObject()
             |> Seq.map (fun p ->
                 let field = ScenarioGeneratorHelpers.pascal p.Name
+                let propertyName = ScenarioGeneratorHelpers.fsharpStringLiteral p.Name
                 let expression =
                     match p.Value.ValueKind with
-                    | JsonValueKind.Number when p.Value.TryGetInt32() |> fst -> sprintf "readInt \"%s\" element" p.Name
-                    | JsonValueKind.Number -> sprintf "readFloat \"%s\" element" p.Name
+                    | JsonValueKind.Number when p.Value.TryGetInt32() |> fst -> sprintf "readInt %s element" propertyName
+                    | JsonValueKind.Number -> sprintf "readFloat %s element" propertyName
                     | JsonValueKind.True
-                    | JsonValueKind.False -> sprintf "readBool \"%s\" element" p.Name
-                    | JsonValueKind.Object -> sprintf "parse%sElement (readObject \"%s\" element)" (ScenarioGeneratorHelpers.pascal p.Name) p.Name
-                    | _ -> sprintf "readString \"%s\" element" p.Name
+                    | JsonValueKind.False -> sprintf "readBool %s element" propertyName
+                    | JsonValueKind.Object -> sprintf "parse%sElement (readObject %s element)" (ScenarioGeneratorHelpers.pascal p.Name) propertyName
+                    | _ -> sprintf "readString %s element" propertyName
 
                 sprintf "            %s = %s" field expression)
             |> String.concat "\n"
@@ -236,19 +253,67 @@ type OpenApiClientGenerator() =
         |> Option.bind (tryProperty "$ref")
         |> Option.bind (fun value -> if value.ValueKind = JsonValueKind.String then schemaNameFromRef (value.GetString()) else None)
 
-    let pathParameterName (path: string) =
+    let pathParameter (path: string) =
         let m = Regex.Match(path, @"\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}")
-        if m.Success then FSharpGeneratedNames.sanitizeIdentifier m.Groups["name"].Value else "id"
+        if m.Success then m.Groups["name"].Value, FSharpGeneratedNames.sanitizeIdentifier m.Groups["name"].Value else "id", "id"
+
+    let operationName (operation: JsonElement) =
+        tryProperty "operationId" operation
+        |> Option.bind (fun operationId -> if operationId.ValueKind = JsonValueKind.String then Some(operationId.GetString()) else None)
 
     let emitOperation (path: string) (operation: JsonElement) =
-        match tryProperty "operationId" operation, responseSchemaName operation with
-        | Some operationId, Some returnType when operationId.ValueKind = JsonValueKind.String ->
-            let methodName = operationId.GetString() |> ScenarioGeneratorHelpers.pascal
-            let parameterName = pathParameterName path
-            sprintf
-                "    member _.%s(%s: int64) : Async<%s> =\n        async {\n            let! _json = send (\"%s\".Replace(\"{%s}\", string %s))\n            return Unchecked.defaultof<%s>\n        }\n"
-                methodName parameterName returnType path parameterName parameterName returnType
-        | _ -> ""
+        match operationName operation with
+        | None -> Error(sprintf "OpenAPI operation at path '%s' must declare a string operationId." path)
+        | Some operationId ->
+            match responseSchemaName operation with
+            | None -> Error(sprintf "OpenAPI operation '%s' must declare a 200 application/json response schema reference." operationId)
+            | Some returnType ->
+                let methodName = operationId |> ScenarioGeneratorHelpers.pascal
+                let originalParameterName, parameterName = pathParameter path
+                let pathLiteral = ScenarioGeneratorHelpers.fsharpStringLiteral path
+                let placeholderLiteral = ScenarioGeneratorHelpers.fsharpStringLiteral ("{" + originalParameterName + "}")
+                Ok(
+                    sprintf
+                        "    member _.%s(%s: int64) : Async<%s> =\n        async {\n            let path = %s.Replace(%s, string %s)\n            let! json = send path\n            return deserialize<%s> json\n        }\n"
+                        methodName
+                        parameterName
+                        returnType
+                        pathLiteral
+                        placeholderLiteral
+                        parameterName
+                        returnType
+                )
+
+    let collectOperationIds (document: JsonDocument) =
+        let operationIds = ResizeArray<string>()
+
+        match document.RootElement.TryGetProperty("paths") with
+        | true, paths when paths.ValueKind = JsonValueKind.Object ->
+            for path in paths.EnumerateObject() do
+                if path.Value.ValueKind = JsonValueKind.Object then
+                    for method in path.Value.EnumerateObject() do
+                        match operationName method.Value with
+                        | Some value -> operationIds.Add value
+                        | None -> ()
+        | _ -> ()
+
+        operationIds
+
+    let emitOperations (document: JsonDocument) =
+        match tryProperty "paths" document.RootElement with
+        | Some paths when paths.ValueKind = JsonValueKind.Object ->
+            let operations = ResizeArray<string>()
+            let errors = ResizeArray<string>()
+
+            for path in paths.EnumerateObject() do
+                if path.Value.ValueKind = JsonValueKind.Object then
+                    for operation in path.Value.EnumerateObject() do
+                        match emitOperation path.Name operation.Value with
+                        | Ok source -> operations.Add source
+                        | Error message -> errors.Add message
+
+            if errors.Count > 0 then Error(String.concat " " errors) else Ok(String.concat "\n" operations)
+        | _ -> Error("OpenAPI document must contain a paths object.")
 
     interface IFSharpIncrementalGenerator with
         member _.Initialize context =
@@ -264,40 +329,32 @@ type OpenApiClientGenerator() =
                     else
                         try
                             use document = JsonDocument.Parse file.Text
-                            let operationIds = ResizeArray<string>()
-
-                            match document.RootElement.TryGetProperty("paths") with
-                            | true, paths when paths.ValueKind = JsonValueKind.Object ->
-                                for path in paths.EnumerateObject() do
-                                    if path.Value.ValueKind = JsonValueKind.Object then
-                                        for method in path.Value.EnumerateObject() do
-                                            match method.Value.TryGetProperty("operationId") with
-                                            | true, op when op.ValueKind = JsonValueKind.String -> operationIds.Add(op.GetString())
-                                            | _ -> ()
-                            | _ -> ()
+                            let operationIds = collectOperationIds document
 
                             match operationIds |> Seq.groupBy id |> Seq.tryFind (fun (_, values) -> Seq.length values > 1) with
                             | Some(operationId, _) -> production.ReportDiagnostic(ScenarioGeneratorHelpers.diagnostic "FSGOPENAPI0002" (sprintf "Duplicate operationId '%s'." operationId) file.Path)
                             | None ->
-                                let ns = ScenarioGeneratorHelpers.namespaceFor "Generated.Api" file
-                                let clientName = ScenarioGeneratorHelpers.typeNameFrom "OpenApiClientName" "OpenApiClient" file
-                                let schemas =
-                                    tryProperty "components" document.RootElement
-                                    |> Option.bind (tryProperty "schemas")
-                                    |> Option.map (fun (schemas: JsonElement) -> schemas.EnumerateObject() |> Seq.map (fun schema -> schema.Name, schema.Value) |> Seq.toList)
-                                    |> Option.defaultValue []
+                                match emitOperations document with
+                                | Error message -> production.ReportDiagnostic(ScenarioGeneratorHelpers.diagnostic "FSGOPENAPI0004" message file.Path)
+                                | Ok operations ->
+                                    let ns = ScenarioGeneratorHelpers.namespaceFor "Generated.Api" file
+                                    let clientName = ScenarioGeneratorHelpers.typeNameFrom "OpenApiClientName" "OpenApiClient" file
+                                    let schemas =
+                                        tryProperty "components" document.RootElement
+                                        |> Option.bind (tryProperty "schemas")
+                                        |> Option.map (fun (schemas: JsonElement) -> schemas.EnumerateObject() |> Seq.map (fun schema -> schema.Name, schema.Value) |> Seq.toList)
+                                        |> Option.defaultValue []
 
-                                let dtos = schemas |> List.map (fun (name, schema) -> emitDto name schema) |> String.concat "\n\n"
-                                let operations =
-                                    match tryProperty "paths" document.RootElement with
-                                    | Some paths when paths.ValueKind = JsonValueKind.Object ->
-                                        paths.EnumerateObject()
-                                        |> Seq.collect (fun path -> path.Value.EnumerateObject() |> Seq.map (fun operation -> emitOperation path.Name operation.Value))
-                                        |> String.concat "\n"
-                                    | _ -> ""
+                                    let dtos = schemas |> List.map (fun (name, schema) -> emitDto name schema) |> String.concat "\n\n"
+                                    let source =
+                                        sprintf
+                                            "namespace %s\n\nopen System.Text.Json\n\n%s\n\ntype %s(send: string -> Async<string>) =\n    let serializerOptions = JsonSerializerOptions(PropertyNameCaseInsensitive = true)\n\n    let deserialize<'T> (json: string) : 'T =\n        let value = JsonSerializer.Deserialize<'T>(json, serializerOptions)\n        if obj.ReferenceEquals(box value, null) then invalidOp \"OpenAPI response deserialized to null.\" else value\n\n%s"
+                                            ns
+                                            dtos
+                                            clientName
+                                            operations
 
-                                let source = sprintf "namespace %s\n\n%s\n\ntype %s(send: string -> Async<string>) =\n%s" ns dtos clientName operations
-                                production.AddImplementationSource(FSharpGeneratedNames.stableHintName "OpenApiClientGenerator" file.Path clientName, source, BeforeLastSourceFile)
+                                    production.AddImplementationSource(FSharpGeneratedNames.stableHintName "OpenApiClientGenerator" file.Path clientName, source, BeforeLastSourceFile)
                         with ex ->
                             production.ReportDiagnostic(ScenarioGeneratorHelpers.diagnostic "FSGOPENAPI0001" ("Invalid OpenAPI JSON: " + ex.Message) file.Path))
             )
@@ -364,7 +421,9 @@ type NativeHeaderBindingGenerator() =
                                     let args = parsedArgs |> Array.choose (function Ok(Some arg) -> Some arg | _ -> None)
                                     let argsText = args |> Array.map (fun (typ, name) -> sprintf "%s %s" typ name) |> String.concat ", "
                                     let returnType = mapPrimitive m.Groups["ret"].Value |> Option.defaultValue "nativeint"
-                                    functions.Add(sprintf "    [<System.Runtime.InteropServices.DllImport(\"%s\", EntryPoint = \"%s\")>]\n    extern %s %s(%s)" library m.Groups["name"].Value returnType (ScenarioGeneratorHelpers.pascal m.Groups["name"].Value) argsText)
+                                    let libraryLiteral = ScenarioGeneratorHelpers.fsharpStringLiteral library
+                                    let entryPointLiteral = ScenarioGeneratorHelpers.fsharpStringLiteral m.Groups["name"].Value
+                                    functions.Add(sprintf "    [<System.Runtime.InteropServices.DllImport(%s, EntryPoint = %s)>]\n    extern %s %s(%s)" libraryLiteral entryPointLiteral returnType (ScenarioGeneratorHelpers.pascal m.Groups["name"].Value) argsText)
                             else
                                 errors.Add("Unsupported C declaration: " + line.Trim())
 
@@ -386,6 +445,8 @@ type SqlQueryGenerator() =
             let trimmed = line.Trim()
             if trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) then Some(trimmed.Substring(prefix.Length).Trim()) else None)
 
+    let supportedTypePattern = Regex(@"^(int|int64|float|float32|bool|string|decimal)( option)?$", RegexOptions.Compiled ||| RegexOptions.IgnoreCase)
+
     let parseTypeMap metadataValue =
         metadataValue
         |> ScenarioGeneratorHelpers.splitCsv
@@ -393,6 +454,11 @@ type SqlQueryGenerator() =
             match entry.Split([| ':' |], 2, StringSplitOptions.TrimEntries) with
             | [| name; typ |] when not (String.IsNullOrWhiteSpace name) && not (String.IsNullOrWhiteSpace typ) -> Some(name, typ)
             | _ -> None)
+
+    let unsupportedType mappings =
+        mappings
+        |> List.tryFind (fun (_, typ) -> not (supportedTypePattern.IsMatch typ))
+        |> Option.map snd
 
     let selectedColumns (text: string) =
         let normalized = text.Replace("\r", " ").Replace("\n", " ")
@@ -437,29 +503,45 @@ type SqlQueryGenerator() =
                         let missingColumn = selectedColumns file.Text |> List.tryFind (fun column -> schema |> List.exists (fun (name, _) -> name.Equals(column, StringComparison.OrdinalIgnoreCase)) |> not)
                         let missingParameter = parameters file.Text |> List.tryFind (fun parameter -> parameterTypes |> List.exists (fun (name, _) -> name.Equals(parameter, StringComparison.OrdinalIgnoreCase)) |> not)
 
-                        match missingColumn, missingParameter with
-                        | Some column, _ -> production.ReportDiagnostic(ScenarioGeneratorHelpers.diagnostic "FSGSQL0002" (sprintf "Selected column '%s' is not present in SqlResultColumns metadata." column) file.Path)
-                        | None, Some parameter -> production.ReportDiagnostic(ScenarioGeneratorHelpers.diagnostic "FSGSQL0003" (sprintf "SQL parameter '@%s' is not present in SqlParameterTypes metadata." parameter) file.Path)
-                        | None, None ->
+                        match missingColumn, missingParameter, unsupportedType schema, unsupportedType parameterTypes with
+                        | Some column, _, _, _ -> production.ReportDiagnostic(ScenarioGeneratorHelpers.diagnostic "FSGSQL0002" (sprintf "Selected column '%s' is not present in SqlResultColumns metadata." column) file.Path)
+                        | None, Some parameter, _, _ -> production.ReportDiagnostic(ScenarioGeneratorHelpers.diagnostic "FSGSQL0003" (sprintf "SQL parameter '@%s' is not present in SqlParameterTypes metadata." parameter) file.Path)
+                        | None, None, Some typ, _
+                        | None, None, None, Some typ -> production.ReportDiagnostic(ScenarioGeneratorHelpers.diagnostic "FSGSQL0004" (sprintf "SQL type '%s' is not supported by this generator." typ) file.Path)
+                        | None, None, None, None ->
                             let ns = ScenarioGeneratorHelpers.namespaceFor "Generated.Data" file
                             let rowType = ScenarioGeneratorHelpers.pascal queryName + "Row"
                             let fields = schema |> List.map (fun (name, typ) -> sprintf "      %s: %s" (ScenarioGeneratorHelpers.pascal name) typ) |> String.concat "\n"
+                            let parameterNames = parameters file.Text
                             let parameterText =
-                                parameters file.Text
+                                parameterNames
                                 |> List.map (fun name ->
                                     let typ = parameterTypes |> List.find (fun (candidate, _) -> candidate.Equals(name, StringComparison.OrdinalIgnoreCase)) |> snd
                                     sprintf "(%s: %s)" (FSharpGeneratedNames.sanitizeIdentifier name) typ)
                                 |> String.concat " "
 
+                            let parameterPairs =
+                                parameterNames
+                                |> List.map (fun name -> sprintf "%s, box %s" (ScenarioGeneratorHelpers.fsharpStringLiteral name) (FSharpGeneratedNames.sanitizeIdentifier name))
+                                |> String.concat "; "
+
+                            let fieldAssignments =
+                                schema
+                                |> List.map (fun (name, typ) -> sprintf "                %s = read<%s> %s row" (ScenarioGeneratorHelpers.pascal name) typ (ScenarioGeneratorHelpers.fsharpStringLiteral name))
+                                |> String.concat "\n"
+
                             let source =
                                 sprintf
-                                    "namespace %s\n\ntype %s =\n    {\n%s\n    }\n\nmodule Queries =\n    let %s (_: obj) %s : Async<%s option> = async { return None }\n"
+                                    "namespace %s\n\ntype %s =\n    {\n%s\n    }\n\ntype SqlParameters = (string * obj) list\ntype SqlRow = Map<string, obj>\ntype SqlQueryExecutor = string -> SqlParameters -> Async<SqlRow option>\n\nmodule Queries =\n    let private sqlText = %s\n\n    let private read<'T> name (row: SqlRow) : 'T =\n        match row.TryFind name with\n        | Some value -> unbox<'T> value\n        | None -> invalidArg name (\"SQL result row did not contain column '\" + name + \"'.\")\n\n    let %s (execute: SqlQueryExecutor) %s : Async<%s option> =\n        async {\n            let parameters: SqlParameters = [ %s ]\n            let! row = execute sqlText parameters\n            return row |> Option.map (fun row ->\n                {\n%s\n                })\n        }\n"
                                     ns
                                     rowType
                                     fields
+                                    (ScenarioGeneratorHelpers.fsharpStringLiteral file.Text)
                                     (queryName |> ScenarioGeneratorHelpers.pascal |> ScenarioGeneratorHelpers.lowerFirst |> FSharpGeneratedNames.sanitizeIdentifier)
                                     parameterText
                                     rowType
+                                    parameterPairs
+                                    fieldAssignments
 
                             production.AddImplementationSource(FSharpGeneratedNames.stableHintName "SqlQueryGenerator" file.Path queryName, source, BeforeLastSourceFile))
             )
