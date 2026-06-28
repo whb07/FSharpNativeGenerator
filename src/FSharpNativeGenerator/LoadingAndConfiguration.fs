@@ -270,7 +270,7 @@ module internal FSharpAnalyzerConfigSupport =
     let parseFiles paths =
         let parsed = paths |> List.map parseFile
         let globalOptions = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        let sections = ResizeArray<string * Dictionary<string, string>>()
+        let sections = ResizeArray<AnalyzerConfigSection>()
 
         for file in parsed do
             for kvp in file.GlobalOptions do

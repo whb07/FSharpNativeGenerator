@@ -274,7 +274,7 @@ type OpenApiClientGenerator() =
                 let placeholderLiteral = ScenarioGeneratorHelpers.fsharpStringLiteral ("{" + originalParameterName + "}")
                 Ok(
                     sprintf
-                        "    member _.%s(%s: int64) : Async<%s> =\n        async {\n            let path = %s.Replace(%s, string %s)\n            let! json = send path\n            return deserialize<%s> json\n        }\n"
+                        "    member this.%s(%s: int64) : Async<%s> =\n        async {\n            let path = %s.Replace(%s, string %s)\n            let! json = send path\n            return this.Deserialize<%s> json\n        }\n"
                         methodName
                         parameterName
                         returnType
@@ -348,7 +348,7 @@ type OpenApiClientGenerator() =
                                     let dtos = schemas |> List.map (fun (name, schema) -> emitDto name schema) |> String.concat "\n\n"
                                     let source =
                                         sprintf
-                                            "namespace %s\n\nopen System.Text.Json\n\n%s\n\ntype %s(send: string -> Async<string>) =\n    let serializerOptions = JsonSerializerOptions(PropertyNameCaseInsensitive = true)\n\n    let deserialize<'T> (json: string) : 'T =\n        let value = JsonSerializer.Deserialize<'T>(json, serializerOptions)\n        if obj.ReferenceEquals(box value, null) then invalidOp \"OpenAPI response deserialized to null.\" else value\n\n%s"
+                                            "namespace %s\n\nopen System.Text.Json\n\n%s\n\ntype %s(send: string -> Async<string>) =\n    let serializerOptions = JsonSerializerOptions(PropertyNameCaseInsensitive = true)\n\n    member private _.Deserialize<'T>(json: string) : 'T =\n        let value = JsonSerializer.Deserialize<'T>(json, serializerOptions)\n        if obj.ReferenceEquals(box value, null) then invalidOp \"OpenAPI response deserialized to null.\" else value\n\n%s"
                                             ns
                                             dtos
                                             clientName
@@ -447,7 +447,7 @@ type SqlQueryGenerator() =
 
     let supportedTypePattern = Regex(@"^(int|int64|float|float32|bool|string|decimal)( option)?$", RegexOptions.Compiled ||| RegexOptions.IgnoreCase)
 
-    let parseTypeMap metadataValue =
+    let parseTypeMap (metadataValue: string) =
         metadataValue
         |> ScenarioGeneratorHelpers.splitCsv
         |> List.choose (fun entry ->
@@ -455,9 +455,9 @@ type SqlQueryGenerator() =
             | [| name; typ |] when not (String.IsNullOrWhiteSpace name) && not (String.IsNullOrWhiteSpace typ) -> Some(name, typ)
             | _ -> None)
 
-    let unsupportedType mappings =
+    let unsupportedType (mappings: (string * string) list) =
         mappings
-        |> List.tryFind (fun (_, typ) -> not (supportedTypePattern.IsMatch typ))
+        |> List.tryFind (fun (_, typ) -> not (supportedTypePattern.IsMatch(typ)))
         |> Option.map snd
 
     let selectedColumns (text: string) =
