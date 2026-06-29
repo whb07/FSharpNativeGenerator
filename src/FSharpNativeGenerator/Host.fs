@@ -10,31 +10,56 @@ type FSharpGeneratorHost(?checker: FSharpChecker) =
         let analyzerOptions = FSharpAnalyzerConfigSupport.parseFiles analyzerConfigFiles
 
         generators
-        |> List.map (fun loaded -> IncrementalGeneratorAdapter(loaded.Generator, loaded.GeneratorId, analyzerOptions) :> IFSharpSourceGenerator)
+        |> List.map (fun loaded ->
+            IncrementalGeneratorAdapter(loaded.Generator, loaded.GeneratorId, analyzerOptions)
+            :> IFSharpSourceGenerator)
 
     let withAnalyzerConfigIdentity (generatorOptions: FSharpSourceGeneratorOptions) =
-        let identity = FSharpAnalyzerConfigSupport.contentIdentityPath generatorOptions.AnalyzerConfigFiles
-        { generatorOptions with AnalyzerConfigFiles = generatorOptions.AnalyzerConfigFiles @ [ identity ] }
+        let identity =
+            FSharpAnalyzerConfigSupport.contentIdentityPath generatorOptions.AnalyzerConfigFiles
+
+        { generatorOptions with
+            AnalyzerConfigFiles = generatorOptions.AnalyzerConfigFiles @ [ identity ] }
 
     member _.Checker = checker
 
-    member _.LoadFromConfiguration(config: FSharpSourceGeneratorConfiguration) : LoadedFSharpGenerator list * FSharpSourceGeneratorDiagnostic list =
-        let results = config.GeneratorPaths |> List.map FSharpGeneratorAssemblyLoader.loadFromPath
+    member _.LoadFromConfiguration
+        (config: FSharpSourceGeneratorConfiguration)
+        : LoadedFSharpGenerator list * FSharpSourceGeneratorDiagnostic list =
+        let results =
+            config.GeneratorPaths |> List.map FSharpGeneratorAssemblyLoader.loadFromPath
+
         results |> List.collect _.Generators, results |> List.collect _.Diagnostics
 
     member _.RunGenerators
-        (options: FSharpProjectOptions, generators: LoadedFSharpGenerator list, generatorOptions: FSharpSourceGeneratorOptions)
-        : Async<FSharpProjectOptions * FSharpSourceGeneratorRunResult> =
+        (
+            options: FSharpProjectOptions,
+            generators: LoadedFSharpGenerator list,
+            generatorOptions: FSharpSourceGeneratorOptions
+        ) : Async<FSharpProjectOptions * FSharpSourceGeneratorRunResult> =
         let originalAnalyzerConfigFiles = generatorOptions.AnalyzerConfigFiles
         let generatorOptions = withAnalyzerConfigIdentity generatorOptions
-        checker.RunSourceGeneratorsAndUpdateProject(options, adapt originalAnalyzerConfigFiles generators, generatorOptions)
+
+        checker.RunSourceGeneratorsAndUpdateProject(
+            options,
+            adapt originalAnalyzerConfigFiles generators,
+            generatorOptions
+        )
 
     member _.ParseAndCheck
-        (options: FSharpProjectOptions, generators: LoadedFSharpGenerator list, generatorOptions: FSharpSourceGeneratorOptions)
-        : Async<FSharpCheckProjectResults * FSharpSourceGeneratorRunResult> =
+        (
+            options: FSharpProjectOptions,
+            generators: LoadedFSharpGenerator list,
+            generatorOptions: FSharpSourceGeneratorOptions
+        ) : Async<FSharpCheckProjectResults * FSharpSourceGeneratorRunResult> =
         let originalAnalyzerConfigFiles = generatorOptions.AnalyzerConfigFiles
         let generatorOptions = withAnalyzerConfigIdentity generatorOptions
-        checker.ParseAndCheckProjectWithSourceGenerators(options, adapt originalAnalyzerConfigFiles generators, generatorOptions)
+
+        checker.ParseAndCheckProjectWithSourceGenerators(
+            options,
+            adapt originalAnalyzerConfigFiles generators,
+            generatorOptions
+        )
 
     member _.Compile
         (argv: string array, generators: LoadedFSharpGenerator list, generatorOptions: FSharpSourceGeneratorOptions)

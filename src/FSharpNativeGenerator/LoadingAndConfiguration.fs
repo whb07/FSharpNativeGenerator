@@ -34,14 +34,21 @@ module FSharpGeneratorAssemblyLoader =
     let private loadTypes (assembly: Assembly) =
         try
             assembly.GetTypes(), []
-        with
-        | :? ReflectionTypeLoadException as ex ->
-            let types = ex.Types |> Array.choose (fun typ -> if isNull typ then None else Some typ)
+        with :? ReflectionTypeLoadException as ex ->
+            let types =
+                ex.Types |> Array.choose (fun typ -> if isNull typ then None else Some typ)
+
             let diagnostics =
                 ex.LoaderExceptions
-                |> Array.choose (fun loaderException -> if isNull loaderException then None else Some loaderException)
+                |> Array.choose (fun loaderException ->
+                    if isNull loaderException then
+                        None
+                    else
+                        Some loaderException)
                 |> Array.map (fun loaderException ->
-                    FSharpSourceGeneratorDiagnostics.error "FSG0001" (sprintf "Generator assembly type load failed: %s" loaderException.Message))
+                    FSharpSourceGeneratorDiagnostics.error
+                        "FSG0001"
+                        (sprintf "Generator assembly type load failed: %s" loaderException.Message))
                 |> Array.toList
 
             types, diagnostics
@@ -69,7 +76,12 @@ module FSharpGeneratorAssemblyLoader =
             let diagnostics = ResizeArray<FSharpSourceGeneratorDiagnostic>(loadDiagnostics)
 
             for typ in types do
-                if typ.IsClass && typ.IsPublic && not typ.IsAbstract && not typ.ContainsGenericParameters then
+                if
+                    typ.IsClass
+                    && typ.IsPublic
+                    && not typ.IsAbstract
+                    && not typ.ContainsGenericParameters
+                then
                     let attribute = FSharpGeneratorAttributeHelpers.tryGet typ
                     let implementsIncremental = typeof<IFSharpIncrementalGenerator>.IsAssignableFrom typ
 
@@ -78,7 +90,10 @@ module FSharpGeneratorAssemblyLoader =
                         diagnostics.Add(
                             FSharpSourceGeneratorDiagnostics.error
                                 "FSG0015"
-                                (sprintf "Generator type '%s' references unsupported source-generation API version %d." typ.FullName attr.ApiVersion)
+                                (sprintf
+                                    "Generator type '%s' references unsupported source-generation API version %d."
+                                    typ.FullName
+                                    attr.ApiVersion)
                         )
                     | Some _, true ->
                         match typ.GetConstructor(Type.EmptyTypes) with
@@ -86,11 +101,14 @@ module FSharpGeneratorAssemblyLoader =
                             diagnostics.Add(
                                 FSharpSourceGeneratorDiagnostics.error
                                     "FSG0002"
-                                    (sprintf "Generator type '%s' must have a public parameterless constructor." typ.FullName)
+                                    (sprintf
+                                        "Generator type '%s' must have a public parameterless constructor."
+                                        typ.FullName)
                             )
                         | ctor ->
                             try
                                 let instance = ctor.Invoke [||] :?> IFSharpIncrementalGenerator
+
                                 let id =
                                     match instance with
                                     | :? IFSharpIncrementalGeneratorWithId as stable -> stable.GeneratorId
@@ -104,7 +122,10 @@ module FSharpGeneratorAssemblyLoader =
                             with ex ->
                                 let message =
                                     match ex with
-                                    | :? TargetInvocationException as invocation when not (isNull invocation.InnerException) -> invocation.InnerException.Message
+                                    | :? TargetInvocationException as invocation when
+                                        not (isNull invocation.InnerException)
+                                        ->
+                                        invocation.InnerException.Message
                                     | _ -> ex.Message
 
                                 diagnostics.Add(
@@ -117,7 +138,9 @@ module FSharpGeneratorAssemblyLoader =
                         diagnostics.Add(
                             FSharpSourceGeneratorDiagnostics.error
                                 "FSG0002"
-                                (sprintf "Generator type '%s' is missing FSharpGeneratorAttribute or IFSharpIncrementalGenerator." typ.FullName)
+                                (sprintf
+                                    "Generator type '%s' is missing FSharpGeneratorAttribute or IFSharpIncrementalGenerator."
+                                    typ.FullName)
                         )
                     | None, false -> ()
 
@@ -125,7 +148,10 @@ module FSharpGeneratorAssemblyLoader =
               Diagnostics = Seq.toList diagnostics }
         with ex ->
             { Generators = []
-              Diagnostics = [ FSharpSourceGeneratorDiagnostics.error "FSG0001" (sprintf "Generator assembly load failed for '%s': %s" path ex.Message) ] }
+              Diagnostics =
+                [ FSharpSourceGeneratorDiagnostics.error
+                      "FSG0001"
+                      (sprintf "Generator assembly load failed for '%s': %s" path ex.Message) ] }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module FSharpSourceGeneratorConfiguration =
@@ -140,7 +166,9 @@ module FSharpSourceGeneratorConfiguration =
         else
             None
 
-    let parseCommandLineLikeArguments (args: string list) : FSharpSourceGeneratorConfiguration * string list * FSharpSourceGeneratorDiagnostic list =
+    let parseCommandLineLikeArguments
+        (args: string list)
+        : FSharpSourceGeneratorConfiguration * string list * FSharpSourceGeneratorDiagnostic list =
         let generators = ResizeArray<string>()
         let additionalFiles = ResizeArray<string>()
         let analyzerConfigs = ResizeArray<string>()
@@ -165,8 +193,10 @@ module FSharpSourceGeneratorConfiguration =
 
 module internal FSharpAnalyzerConfigSupport =
     let emptyOptions =
-        { GlobalOptions = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string>
-          GetOptionsForPath = fun _ -> Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string> }
+        { GlobalOptions =
+            Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string>
+          GetOptionsForPath =
+            fun _ -> Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) :> IReadOnlyDictionary<string, string> }
 
     type private AnalyzerConfigSection =
         { BaseDirectory: string
@@ -181,7 +211,10 @@ module internal FSharpAnalyzerConfigSupport =
         if String.IsNullOrWhiteSpace path then
             path
         else
-            try Path.GetFullPath path with _ -> path
+            try
+                Path.GetFullPath path
+            with _ ->
+                path
 
     let private trimSection (line: string) =
         line.Trim().TrimStart('[').TrimEnd(']').Trim()
@@ -195,17 +228,22 @@ module internal FSharpAnalyzerConfigSupport =
             let key = line.Substring(0, index).Trim()
             let value = line.Substring(index + 1).Trim()
 
-            if String.IsNullOrWhiteSpace key then None else Some(key, value)
+            if String.IsNullOrWhiteSpace key then
+                None
+            else
+                Some(key, value)
 
-    let private normalizeSeparators (value: string) =
-        value.Replace('\\', '/')
+    let private normalizeSeparators (value: string) = value.Replace('\\', '/')
 
     let private globMatches (pattern: string) (value: string) =
         let comparison = StringComparison.OrdinalIgnoreCase
         let normalizedPattern = normalizeSeparators pattern
         let normalizedValue = normalizeSeparators value
 
-        if normalizedPattern.Contains("*", StringComparison.Ordinal) || normalizedPattern.Contains("?", StringComparison.Ordinal) then
+        if
+            normalizedPattern.Contains("*", StringComparison.Ordinal)
+            || normalizedPattern.Contains("?", StringComparison.Ordinal)
+        then
             let regex =
                 "^"
                 + Regex.Escape(normalizedPattern).Replace("\\*", ".*").Replace("\\?", ".")
@@ -219,11 +257,18 @@ module internal FSharpAnalyzerConfigSupport =
         let pattern = section.Pattern |> normalizeSeparators
         let fullPath = normalizePath path |> normalizeSeparators
         let fileName = Path.GetFileName fullPath
+
         let relativePath =
-            try Path.GetRelativePath(section.BaseDirectory, normalizePath path) |> normalizeSeparators with _ -> fullPath
+            try
+                Path.GetRelativePath(section.BaseDirectory, normalizePath path)
+                |> normalizeSeparators
+            with _ ->
+                fullPath
 
         if pattern.Contains("/", StringComparison.Ordinal) then
-            globMatches pattern relativePath || globMatches pattern fullPath || fullPath.EndsWith(pattern, StringComparison.OrdinalIgnoreCase)
+            globMatches pattern relativePath
+            || globMatches pattern fullPath
+            || fullPath.EndsWith(pattern, StringComparison.OrdinalIgnoreCase)
         else
             globMatches pattern fileName || globMatches pattern fullPath
 
@@ -231,11 +276,16 @@ module internal FSharpAnalyzerConfigSupport =
         let globalOptions = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         let sections = ResizeArray<AnalyzerConfigSection>()
         let mutable current: Dictionary<string, string> option = None
+
         let baseDirectory =
             try
                 let fullPath = normalizePath path
                 let directory = Path.GetDirectoryName fullPath
-                if isNull directory then Directory.GetCurrentDirectory() else directory
+
+                if isNull directory then
+                    Directory.GetCurrentDirectory()
+                else
+                    directory
             with _ ->
                 Directory.GetCurrentDirectory()
 
@@ -248,13 +298,18 @@ module internal FSharpAnalyzerConfigSupport =
                     && not (line.StartsWith("#", StringComparison.Ordinal))
                     && not (line.StartsWith(";", StringComparison.Ordinal))
                 then
-                    if line.StartsWith("[", StringComparison.Ordinal) && line.EndsWith("]", StringComparison.Ordinal) then
+                    if
+                        line.StartsWith("[", StringComparison.Ordinal)
+                        && line.EndsWith("]", StringComparison.Ordinal)
+                    then
                         let section = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+
                         sections.Add(
                             { BaseDirectory = baseDirectory
                               Pattern = trimSection line
                               Options = section }
                         )
+
                         current <- Some section
                     else
                         match trySplitKeyValue line with
@@ -294,11 +349,15 @@ module internal FSharpAnalyzerConfigSupport =
 
     let contentIdentityPath analyzerConfigPaths =
         use sha = SHA256.Create()
+
         let add (value: string) =
             let bytes = Encoding.UTF8.GetBytes value
             sha.TransformBlock(bytes, 0, bytes.Length, null, 0) |> ignore
 
-        for path in analyzerConfigPaths |> List.map normalizePath |> List.sortWith (fun left right -> StringComparer.OrdinalIgnoreCase.Compare(left, right)) do
+        for path in
+            analyzerConfigPaths
+            |> List.map normalizePath
+            |> List.sortWith (fun left right -> StringComparer.OrdinalIgnoreCase.Compare(left, right)) do
             add path
             add "\n"
 
